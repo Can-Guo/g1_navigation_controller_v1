@@ -1,0 +1,109 @@
+# ============================================================================
+# G1 Navigation - Environment Configuration
+# ============================================================================
+# This file contains system-specific configuration parameters that may vary
+# between different deployment environments (development, production, different robots)
+#
+# Author: G1 Navigation Team
+# Date: 2025-11-26
+# Version: 1.0.0
+# ============================================================================
+
+# ==============================================================================
+# Hardware Configuration
+# ==============================================================================
+
+# Network Interface
+# ------------------------------------------------------------------------------
+# Network interface for Unitree SDK DDS communication
+# Common values: ens37 (VM), eth0 (standard), enp109s0 (PCI), wlan0 (WiFi - not recommended)
+network_interface: 'enx6c1ff723d793'
+
+# Hardware Mode
+# ------------------------------------------------------------------------------
+# Enable/disable hardware SDK control
+# - true: Direct G1 robot control via Unitree SDK (requires unitree_sdk2py)
+# - false: Simulation mode (publishes /cmd_vel only)
+use_hardware: false  # 🤖 硬件模式
+
+# ==============================================================================
+# Map Configuration
+# ==============================================================================
+
+# Map Directory
+# ------------------------------------------------------------------------------
+# Base directory containing map files (relative to package share directory)
+map_directory: 'map'
+
+# Map Files
+# ------------------------------------------------------------------------------
+# Occupancy grid map for global path planning (A*)
+map_file: 'map.yaml'
+
+# Point cloud map for localization (mid360_locate)
+pcd_file: 'map.pcd'
+
+# ==============================================================================
+# Navigation Parameters
+# ==============================================================================
+
+# Speed Limits
+# ------------------------------------------------------------------------------
+# Maximum linear velocity (m/s)
+# Recommended: 0.20-0.30 for indoor navigation
+max_linear_speed: 0.25
+
+# Maximum angular velocity (rad/s)
+# Recommended: 0.08-0.12 (0.08 rad/s ≈ 4.6°/s)
+max_angular_speed: 0.08
+
+# Path Following
+# ------------------------------------------------------------------------------
+# Distance threshold for waypoint advancement (meters)
+waypoint_distance: 0.5
+
+# Distance threshold for goal reaching (meters)
+goal_tolerance: 0.20  # 🎯 减小目标容忍距离, York, 20260203
+
+# ==============================================================================
+# Sensor Configuration
+# ==============================================================================
+
+# LiDAR Driver
+# ------------------------------------------------------------------------------
+# Enable/disable Livox MID360 driver
+use_livox: true
+
+# Localization
+# ------------------------------------------------------------------------------
+# Enable/disable mid360_locate localization node
+use_localization: true
+
+# ==============================================================================
+# Visualization
+# ==============================================================================
+
+# RViz Configuration
+# ------------------------------------------------------------------------------
+# Enable/disable RViz2 on launch
+use_rviz: true
+
+# RViz config file (relative to package share/rviz directory)
+rviz_config: 'visualization_fixed.rviz'
+
+# ==============================================================================
+# Advanced Parameters (Optional)
+# ==============================================================================
+
+# Hardware Timeouts
+# ------------------------------------------------------------------------------
+# SDK command timeout (seconds)
+cmd_timeout: 0.5
+
+# DWA command timeout (seconds)
+dwa_timeout: 0.5
+
+# Control Loop Frequency
+# ------------------------------------------------------------------------------
+# Position control update rate (Hz)
+control_frequency: 10.0

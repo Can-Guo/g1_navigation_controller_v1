@@ -1,0 +1,36 @@
+waypoints:
+  home_for_safety:
+    x: 0.0
+    y: 0.0
+    z: 0.0
+    w: 0.0
+
+  pick_empty_box:
+    x: 0.0
+    y: -1.0
+    z: 0.0
+    w: 0.0
+    
+  place_empty_box:
+    x: -1.0
+    y: -2.0
+    z: 0.0
+    w: 0.0
+  
+  pick_product_box:
+    x: 0.0
+    y: -2.0
+    z: 0.0
+    w: 0.0
+    
+  place_product_box:
+    x: 1.0
+    y: -2.0
+    z: 0.0
+    w: 0.0
+    
+  ng:
+    x: 3.0
+    y: -3.0
+    z: 0.0
+    w: 0.0

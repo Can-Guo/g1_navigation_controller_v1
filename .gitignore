@@ -1,0 +1,14 @@
+build/
+install/
+log/
+.vscode/
+*.pyc
+__pycache__/
+*.zip
+*.ZIP
+*backup*/
+*Backup*/
+Backup_map/
+*.pcd
+
+

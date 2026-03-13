@@ -1,0 +1,28 @@
+<!--
+Localization Launch File for Robot Navigation
+Author: shenlanxueyuan
+Email: 1347893477@qq.com
+Organization: Shen Lan xue yuan
+Date: 2025-03-28
+
+This launch file configures the localization system including:
+- LiDAR-based localization node
+- TF transformations
+- RViz visualization for localization results
+-->
+
+<launch>
+    <!-- 启动一个 ROS 节点 -->
+    <node name="locate_node" pkg="mid360_locate" type="locate_node" output="screen">
+        <!-- 设置节点参数 -->
+        <param name="map_file_path" value="$(find fast_lio)/PCD/scans.pcd"/>  
+        <param name="points_type" value="3"/> 
+        <param name="map_roll" value="0"/>  
+        <param name="map_pitch" value="0.0"/> 
+        <param name="map_yaw" value="0.0"/>
+    </node>
+    <node pkg="tf2_ros" type="static_transform_publisher" name="map_to_camera_init" args="0 0 0 0 0 0 /base_link /pelvis" /> 
+
+    <!-- 启动 RViz-->
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find mid360_locate)/rviz/display_localization_results.rviz" output="screen"/> 
+</launch>

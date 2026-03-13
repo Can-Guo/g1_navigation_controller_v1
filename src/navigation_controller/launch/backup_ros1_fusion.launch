@@ -1,0 +1,63 @@
+<!--
+Fusion Launch File for Robot Navigation 
+Author: shenlanxueyuan
+Email: 1347893477@qq.com
+Organization: Shen Lan xue yuan
+Date: 2024-05-28
+
+This launch file configures the complete navigation system including:
+- Map server and localization
+- A* path planning
+- DWA obstacle avoidance
+- Position control
+- RViz visualization
+-->
+
+<launch>
+    <!-- 网络接口参数 -->
+    <arg name="interface" default="enp109s0" />
+    
+    <node pkg="tf2_ros" type="static_transform_publisher" name="base_link_to_pelvis" args="0 0 0 0 0 0 /base_link /pelvis" />  
+    
+    <!-- 加载地图 -->  
+    <!-- <node name="map_server" pkg="map_server" type="map_server" args="$(find g1_nav)/map/map.yaml" />  -->
+    <node name="map_server" pkg="map_server" type="map_server" args="/home/york/catkin_ws_nav_real/catkin_ws/src/g1_nav/map/map.yaml" />    
+    <!-- 启动一个 ROS 定位节点 -->
+    <node name="locate_node" pkg="mid360_locate" type="locate_node" output="screen">
+        <!-- <param name="map_file_path" value="$(find g1_nav)/map/map.pcd"/> -->
+        <param name="map_file_path" value="/home/york/catkin_ws_nav_real/catkin_ws/src/g1_nav/map/map.pcd"/>
+        <!-- <param name="points_type" value="3"/> -->
+        <param name="points_type" value="0"/>
+        <param name="topic_name" value="/livox/lidar"/>
+        <param name="map_roll" value="0"/>
+        <param name="map_pitch" value="0.0"/>
+        <param name="map_yaw" value="0.0"/>
+    </node>
+    
+    <!-- 启动A*规划器 -->
+    <node name="astar_planner" pkg="g1_nav" type="astar_planner.py" output="screen" />
+    
+    <!-- 启动DWA避障规划器 -->
+    <node name="dwa_planner" pkg="g1_nav" type="dwa_planner_ros1_mid360.py" output="screen" />
+    
+    <!-- 启动位置控制节点 -->
+    <node name="g1_position_control" pkg="g1_nav" type="g1_position_control.py" output="screen">
+        <param name="waypoint_distance" value="0.5"/>
+        <param name="goal_tolerance" value="0.3"/>
+        <!-- <param name="max_linear_speed" value="0.5"/>  -->
+        <param name="max_linear_speed" value="0.3"/>  
+        <param name="max_angular_speed" value="0.3"/>
+    </node>
+         
+    <!-- 启动RViz可视化 -->
+    <!-- <node pkg="rviz" type="rviz" name="fusion_rviz" args="-d $(find g1_nav)/rviz/visualization.rviz" output="screen"> -->
+    <node pkg="rviz" type="rviz" name="fusion_rviz" args="-d /home/york/catkin_ws_nav_real/catkin_ws/src/g1_nav/rviz/visualization.rviz" output="screen">
+    </node>
+
+
+    <!-- York, 20250715 -->
+    <!-- 启动 Livox 驱动节点 -->
+    <include file="$(find livox_ros_driver2)/launch_ROS1/msg_MID360.launch" />
+
+    <!-- 其他导航相关节点 -->
+</launch>
