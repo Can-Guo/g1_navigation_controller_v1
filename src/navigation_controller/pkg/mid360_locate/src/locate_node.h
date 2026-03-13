@@ -14,6 +14,7 @@
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <std_msgs/msg/float32.hpp>
+#include <std_msgs/msg/bool.hpp>
 
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/voxel_grid.h>
@@ -100,6 +101,7 @@ extern std::shared_ptr<rclcpp::Node> g_node;
 
 // 新增：配准置信度发布者和历史记录
 extern rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr confidence_pub;
+extern rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr localization_ready_pub;
 extern std::vector<RegistrationQuality> quality_history;  // 保存最近的配准质量历史
 
 // ============================================================================
@@ -136,6 +138,23 @@ extern float g_confidence_threshold;         // Minimum confidence to accept a m
 extern float g_max_position_jump_m;          // Reject if translation jump exceeds this (after warmup)
 extern float g_max_rotation_jump_rad;        // Reject if rotation jump exceeds this (after warmup)
 extern int g_reject_check_warmup_frames;     // Frames to warm up before enabling jump rejection
+
+// ============================================================================
+// 🚀 Initialization / re-localization behavior
+//
+// Goal:
+// - Default: auto-initialize from map origin (or configured pose) without
+//   requiring manual 2D Pose Estimate at startup.
+// - Still allow manual re-localization from RViz at any time.
+// ============================================================================
+extern bool g_auto_initialize_pose;          // true: auto-use configured initial pose at startup
+extern bool g_allow_runtime_relocalization;  // true: accept /initialpose even after startup
+extern double g_auto_init_x;                 // auto init x in map frame
+extern double g_auto_init_y;                 // auto init y in map frame
+extern double g_auto_init_z;                 // auto init z in map frame
+extern double g_auto_init_yaw;               // auto init yaw in map frame (rad)
+extern int g_localization_ready_streak_needed;  // consecutive high-confidence frames to mark ready
+extern bool g_localization_ready;               // runtime flag
 
 // 函数声明
 pcl::PointCloud<pcl::PointXYZ>::Ptr normalSpaceSampling(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud, int target_points);

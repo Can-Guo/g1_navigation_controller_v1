@@ -11,6 +11,7 @@ rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr points_pub;
 rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub;
 rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub;
 rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr confidence_pub;  // 新增：置信度发布者
+rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr localization_ready_pub;
 rclcpp::Time t_msg = rclcpp::Time(0);
 bool received_initial_pose = false;
 std::shared_ptr<rclcpp::Node> g_node;
@@ -25,10 +26,22 @@ double g_imu_buffer_sec = 5.0;
 int64_t g_imu_time_offset_ns = 0;
 int g_deskew_reference_mode = 0;  // 0=start, 1=mid, 2=end
 
-float g_confidence_threshold = 0.20f;
+// 默认置信度阈值上调到 0.30：
+// 现场经验表明 0.20~0.25 容易放过低质量匹配，导致“看起来有定位但很不稳”。
+float g_confidence_threshold = 0.30f;
 float g_max_position_jump_m = 4.0f;
 float g_max_rotation_jump_rad = 2.0f;
 int g_reject_check_warmup_frames = 5;
+
+bool g_auto_initialize_pose = true;
+bool g_allow_runtime_relocalization = true;
+double g_auto_init_x = 0.0;
+double g_auto_init_y = 0.0;
+double g_auto_init_z = 1.3;
+double g_auto_init_yaw = 0.0;
+int g_localization_ready_streak_needed = 3;
+bool g_localization_ready = false;
+int g_confident_streak = 0;
 
 // ============================================================================
 // IMU buffer + helper functions for rotation-only deskew
@@ -340,26 +353,65 @@ float computeAdaptiveLocalMapRadius(
     return radius;
 }
 
-void initialPoseCallback(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg) {
-    if (!received_initial_pose) {
-        // 从消息中提取位置
-        veh_pose(0, 3) = msg->pose.pose.position.x;
-        veh_pose(1, 3) = msg->pose.pose.position.y;
-        veh_pose(2, 3) = 1.3;
-
-        // 从消息中提取姿态（四元数）
-        Eigen::Quaterniond q;
-        tf2::fromMsg(msg->pose.pose.orientation, q);
-
-        // 将两个旋转组合起来
-        Eigen::Quaternionf q_final = q.cast<float>();
-
-        // 将四元数转换为旋转矩阵
-        veh_pose.topLeftCorner(3, 3) = q_final.toRotationMatrix();
-
-        received_initial_pose = true;
-        RCLCPP_INFO(g_node->get_logger(), "Received initial pose from RViz");
+namespace {
+void publishLocalizationReady(bool ready) {
+    g_localization_ready = ready;
+    if (localization_ready_pub) {
+        std_msgs::msg::Bool msg;
+        msg.data = ready;
+        localization_ready_pub->publish(msg);
     }
+}
+
+void applyInitialPose(
+    double x, double y, double z, const Eigen::Quaternionf& q,
+    const char* source, bool force_reinitialize_registration) {
+    veh_pose = Eigen::Matrix4f::Identity();
+    veh_pose(0, 3) = static_cast<float>(x);
+    veh_pose(1, 3) = static_cast<float>(y);
+    veh_pose(2, 3) = static_cast<float>(z);
+    veh_pose.topLeftCorner(3, 3) = q.normalized().toRotationMatrix();
+
+    prev_veh_pose = veh_pose;
+    received_initial_pose = true;
+
+    // Re-initialize scan matching from this pose.
+    // This is important for runtime manual re-localization: we must switch back
+    // to robust NDT initialization path before returning to GICP tracking.
+    if (force_reinitialize_registration) {
+        inited = false;
+    }
+
+    quality_history.clear();
+    publishLocalizationReady(false);
+
+    RCLCPP_INFO(g_node->get_logger(),
+        "Initial pose set from %s: x=%.3f y=%.3f z=%.3f (registration reinit=%s)",
+        source, x, y, z, force_reinitialize_registration ? "true" : "false");
+}
+}  // namespace
+
+void initialPoseCallback(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg) {
+    // Startup: always accept the first pose.
+    // Runtime: accept new /initialpose only if enabled by parameter.
+    if (received_initial_pose && !g_allow_runtime_relocalization) {
+        return;
+    }
+
+    Eigen::Quaterniond q_msg;
+    tf2::fromMsg(msg->pose.pose.orientation, q_msg);
+    const Eigen::Quaternionf q = q_msg.cast<float>();
+
+    // Keep z from configurable auto-init/default behavior. For many G1 setups
+    // map z for base_link is not 0; preserving configured z avoids sudden jumps.
+    const double z = g_auto_init_z;
+    applyInitialPose(
+        msg->pose.pose.position.x,
+        msg->pose.pose.position.y,
+        z,
+        q,
+        "RViz /initialpose",
+        true);
 }
  
 void pub_path(Eigen::Matrix4f &pose) {
@@ -442,6 +494,19 @@ void registration(pcl::PointCloud<pcl::PointXYZ>::Ptr &points, pcl::PointCloud<p
             conf_msg.data = quality.getConfidence();
             confidence_pub->publish(conf_msg);
         }
+
+        // 启动阶段 readiness 判定：连续高置信度后再标记“定位就绪”。
+        if (quality.getConfidence() >= g_confidence_threshold) {
+            g_confident_streak++;
+        } else {
+            g_confident_streak = 0;
+        }
+        if (!g_localization_ready && g_confident_streak >= g_localization_ready_streak_needed) {
+            publishLocalizationReady(true);
+            RCLCPP_INFO(g_node->get_logger(),
+                "Localization READY after NDT init: confidence=%.2f, streak=%d",
+                quality.getConfidence(), g_confident_streak);
+        }
         
     } else {
         // ====================================================================
@@ -517,6 +582,19 @@ void registration(pcl::PointCloud<pcl::PointXYZ>::Ptr &points, pcl::PointCloud<p
                 "配准成功: 置信度=%.2f, 内点率=%.2f, 适应度=%.4f, 位移=%.2fm, 旋转=%.2frad",
                 confidence, quality.inlier_ratio, quality.fitness_score,
                 position_jump, rotation_jump);
+
+            // 连续高置信度记分，用于发布 localization_ready。
+            if (confidence >= g_confidence_threshold) {
+                g_confident_streak++;
+            } else {
+                g_confident_streak = 0;
+            }
+            if (!g_localization_ready && g_confident_streak >= g_localization_ready_streak_needed) {
+                publishLocalizationReady(true);
+                RCLCPP_INFO(g_node->get_logger(),
+                    "Localization READY: confidence=%.2f, streak=%d",
+                    confidence, g_confident_streak);
+            }
         } else {
             // 拒绝配准结果，保持上一次位姿
             // RCLCPP_WARN(g_node->get_logger(),
@@ -527,6 +605,12 @@ void registration(pcl::PointCloud<pcl::PointXYZ>::Ptr &points, pcl::PointCloud<p
             // 对于G1机器人，可以使用简单的运动模型预测
             // 这里暂时保持位姿不变，实际部署时可集成IMU数据
             candidate_pose = prev_veh_pose;
+
+            // 拒绝当前帧时，说明定位可信度下降，清空 streak 并置为 not-ready。
+            g_confident_streak = 0;
+            if (g_localization_ready) {
+                publishLocalizationReady(false);
+            }
         }
         
         // 保存质量历史（最多保留最近50次）

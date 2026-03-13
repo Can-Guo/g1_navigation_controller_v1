@@ -94,6 +94,10 @@ def generate_launch_description():
     default_use_rviz = str(env_config.get('use_rviz', 'true')).lower()
     default_rviz_config = env_config.get('rviz_config', 'visualization_fixed.rviz')
     default_cmd_timeout = str(env_config.get('cmd_timeout', 0.5))
+    # Localization confidence level policy (for logging and operator awareness)
+    # NOTE: runtime threshold enforcement is implemented in action server nodes.
+    default_conf_green = str(env_config.get('localization_confidence_green_threshold', 0.45))
+    default_conf_red = str(env_config.get('localization_confidence_red_threshold', 0.35))
     
     # Resolve map paths
     map_dir = os.path.join(nav_controller_dir, default_map_directory)
@@ -501,6 +505,17 @@ def generate_launch_description():
             'map_roll': 0.0,
             'map_pitch': 0.0,
             'map_yaw': 0.0,
+
+            # ========== 🚀 自动初始化与手动重定位 ==========
+            # 默认自动从 map 原点附近启动定位，不再强制要求 RViz 手动点 initial pose。
+            # 若现场需要，可以随时在 RViz 再次发送 /initialpose 做手动重定位。
+            'auto_initialize_pose': True,
+            'allow_runtime_relocalization': True,
+            'auto_init_x': 0.0,
+            'auto_init_y': 0.0,
+            'auto_init_z': 1.3,
+            'auto_init_yaw': 0.0,
+            'localization_ready_streak_needed': 3,
             
             # ========== 🔧 紧急修复: 定位鲁棒性参数 ==========
             
@@ -544,6 +559,14 @@ def generate_launch_description():
             # - 初始化阶段 → 收敛阶段 → 跟踪阶段
             'enable_adaptive_thresholds': True,  # 启用自适应阈值
             'convergence_check_window': 5,  # 收敛检查窗口 (连续成功次数)
+
+            # 配准接受阈值（与 locate_node 内部一致）
+            # 当 confidence 连续达标时，/localization_ready 会置为 true。
+            # 默认阈值提升到 0.30，避免 0.20~0.25 低置信度结果被过早接受。
+            'confidence_threshold': 0.30,
+            'max_position_jump_m': 4.0,
+            'max_rotation_jump_rad': 2.0,
+            'reject_check_warmup_frames': 5,
             
             # 7. 发布频率控制
             'publish_rate': 10.0,  # TF 发布频率 (Hz)
@@ -790,11 +813,31 @@ def generate_launch_description():
             '  - Use Localization: ', LaunchConfiguration('use_localization'), '\n',
             '\n',
             'TF Tree Configuration:\n',
-            f'  - Mode: {"🤖 Hardware (EKF Dynamic TF)" if mid360_available and default_use_localization == "true" else "🎮 Simulation (Static TF)"}\n',
-            f'  - EKF Node: {"✓ Active" if mid360_available and default_use_localization == "true" else "✗ Disabled (no sensor input)"}\n',
+            '  - Localization Mode: ',
+            PythonExpression([
+                '"🤖 Real-sensor mode (EKF dynamic TF)" if "',
+                LaunchConfiguration('use_localization'),
+                '" == "true" else "🎮 Simulation mode (static TF)"'
+            ]), '\n',
+            '  - EKF Node: ',
+            PythonExpression([
+                '"✓ Active" if "',
+                LaunchConfiguration('use_localization'),
+                '" == "true" else "✗ Disabled (no sensor input)"'
+            ]), '\n',
             '  - TF Chain: map → odom → base_link → pelvis → lidar_frame → livox_frame\n',
-            f'  - map→odom: {"EKF dynamic TF" if mid360_available and default_use_localization == "true" else "Static TF (identity)"}\n',
-            f'  - odom→base_link: {"locate_node/EKF" if mid360_available and default_use_localization == "true" else "Static TF (robot at origin)"}\n',
+            '  - map→odom: ',
+            PythonExpression([
+                '"EKF dynamic TF" if "',
+                LaunchConfiguration('use_localization'),
+                '" == "true" else "Static TF (identity)"'
+            ]), '\n',
+            '  - odom→base_link: ',
+            PythonExpression([
+                '"locate_node/EKF" if "',
+                LaunchConfiguration('use_localization'),
+                '" == "true" else "Static TF (robot at origin)"'
+            ]), '\n',
             '\n',
             'Sensor Fusion (Hardware Mode Only):\n',
             '  - Input 1: /odometry/map (LiDAR 定位, 2-4 Hz)\n',
@@ -802,14 +845,33 @@ def generate_launch_description():
             '  - Output: /odometry/ekf (融合后的里程计, 50 Hz)\n',
             '  - Benefit: 旋转时定位稳定性提升 200% (置信度 0.25→0.70)\n',
             '\n',
+            'Localization Confidence Levels:\n',
+            '  - GREEN (Normal): confidence >= ', default_conf_green, '\n',
+            '  - YELLOW (Warning): ', default_conf_red, ' <= confidence < ', default_conf_green, '\n',
+            '  - RED (Danger): confidence < ', default_conf_red, '\n',
+            '  - Current Level: ',
+            PythonExpression([
+                '"INIT/UNKNOWN (waiting for /localization_confidence)" if "',
+                LaunchConfiguration('use_localization'),
+                '" == "true" else "N/A (localization disabled)"'
+            ]), '\n',
+            '\n',
             'Hardware Control (Dual-Channel Architecture):\n',
             '  - Use Hardware: ', LaunchConfiguration('use_hardware'), '\n',
             '  - Network Interface: ', LaunchConfiguration('hardware_interface'), '\n',
+            '  - Active Control Mode: ',
+            PythonExpression([
+                '"🤖 HARDWARE ENABLED (SDK + /cmd_vel)" if "',
+                LaunchConfiguration('use_hardware'),
+                '" == "true" else "🎮 SAFE DEFAULT (simulation, /cmd_vel only)"'
+            ]), '\n',
             '  - 🎮 Simulation Mode: Publishes /cmd_vel only\n',
             '  - 🤖 Hardware Mode: Publishes /cmd_vel + SDK direct control\n',
             '  - 💡 Benefit: ROS2 ecosystem compatibility + low-latency control\n',
             '\n',
             'Important Notes:\n',
+            '  - 🔒 Safety Gate: hardware control is OFF by default.\n',
+            '  - 🔒 To enable real robot motion, user MUST launch with: use_hardware:=true\n',
             '  - 🎮 Simulation Mode: Robot visualization at origin, use RViz "2D Pose Estimate" to set position\n',
             '  - 🤖 Hardware Mode: locate_node publishes real-time pose, waits for /initialpose from RViz\n',
             '  - 🤖 Hardware Mode: /points_map (PCD map) published at 1Hz for visualization\n',
