@@ -834,7 +834,7 @@ class AStarPlanner(Node):
         try:
             # 获取包的路径 - ROS2使用ament_index_python
             from ament_index_python.packages import get_package_share_directory
-            package_path = get_package_share_directory('g1_nav')
+            package_path = get_package_share_directory('navigation_controller')
             
             # 创建path文件夹（如果不存在）
             path_dir = os.path.join(package_path, 'path')

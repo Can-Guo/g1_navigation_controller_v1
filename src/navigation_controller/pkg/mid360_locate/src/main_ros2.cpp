@@ -23,6 +23,9 @@ int main(int argc, char **argv) {
     node->declare_parameter<int64_t>("imu_time_offset_ns", 0);
     // 0=start, 1=mid, 2=end
     node->declare_parameter<int>("deskew_reference_mode", 0);
+    node->declare_parameter<int>("scan_sample_target_max", 2500);
+    node->declare_parameter<int>("min_scan_points_for_registration", 800);
+    node->declare_parameter<int>("scan_status_log_interval_ms", 3000);
 
     // =========================================================================
     // Registration acceptance parameters
@@ -40,7 +43,7 @@ int main(int argc, char **argv) {
     node->declare_parameter<bool>("allow_runtime_relocalization", true);
     node->declare_parameter<double>("auto_init_x", 0.0);
     node->declare_parameter<double>("auto_init_y", 0.0);
-    node->declare_parameter<double>("auto_init_z", 1.3);
+    node->declare_parameter<double>("auto_init_z", 1.30);
     node->declare_parameter<double>("auto_init_yaw", 0.0);
     node->declare_parameter<int>("localization_ready_streak_needed", 3);
     
@@ -65,6 +68,9 @@ int main(int argc, char **argv) {
     node->get_parameter("imu_buffer_sec", g_imu_buffer_sec);
     node->get_parameter("imu_time_offset_ns", g_imu_time_offset_ns);
     node->get_parameter("deskew_reference_mode", g_deskew_reference_mode);
+    node->get_parameter("scan_sample_target_max", g_scan_sample_target_max);
+    node->get_parameter("min_scan_points_for_registration", g_min_scan_points_for_registration);
+    node->get_parameter("scan_status_log_interval_ms", g_scan_status_log_interval_ms);
 
     // Read registration thresholds into global config (used by locate_node_ros2.cpp)
     {
@@ -92,9 +98,10 @@ int main(int argc, char **argv) {
     RCLCPP_INFO(node->get_logger(), "Topic name: %s", topic_name.c_str());
 
     RCLCPP_INFO(node->get_logger(),
-      "Deskew: enable=%s, imu_topic=%s, imu_buffer_sec=%.1f, imu_time_offset_ns=%ld, ref_mode=%d",
+      "Deskew: enable=%s, imu_topic=%s, imu_buffer_sec=%.1f, imu_time_offset_ns=%ld, ref_mode=%d, sample_max=%d, min_scan_pts=%d, log_interval_ms=%d",
       g_enable_deskew ? "true" : "false", g_imu_topic.c_str(), g_imu_buffer_sec,
-      static_cast<long>(g_imu_time_offset_ns), g_deskew_reference_mode);
+      static_cast<long>(g_imu_time_offset_ns), g_deskew_reference_mode,
+      g_scan_sample_target_max, g_min_scan_points_for_registration, g_scan_status_log_interval_ms);
 
     RCLCPP_INFO(node->get_logger(),
       "Registration thresholds: confidence>=%.2f, pos_jump<=%.2fm, rot_jump<=%.2frad, warmup=%d frames",

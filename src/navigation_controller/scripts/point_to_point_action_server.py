@@ -77,7 +77,7 @@ from rclpy.node import Node
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
 import math
 import time
@@ -735,7 +735,11 @@ class PointToPointActionServer(Node):
                 # 解析点云数据
                 for point in point_cloud2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True):
                     dist = math.sqrt((point[0] - robot_x)**2 + (point[1] - robot_y)**2)
-                    min_distance = min(min_distance, dist)
+                    if dist < min_distance:
+                        min_distance = dist
+                    # 性能优化：达到危险阈值后无需继续遍历全量点云。
+                    if min_distance < self.obstacle_critical_distance:
+                        break
             
             # 更新接近度等级
             if min_distance < self.obstacle_critical_distance:

@@ -20,13 +20,13 @@ PointToPoint Navigation Action Client - 测试程序
 
 使用方法:
     # 运行所有测试
-    ros2 run g1_nav test_point_to_point_action.py
+    ros2 run navigation_controller test_point_to_point_action.py
     
     # 运行单个测试
-    ros2 run g1_nav test_point_to_point_action.py --test basic
+    ros2 run navigation_controller test_point_to_point_action.py --test basic
     
     # 交互模式 (手动输入目标点)
-    ros2 run g1_nav test_point_to_point_action.py --interactive
+    ros2 run navigation_controller test_point_to_point_action.py --interactive
 
 性能指标:
     - 到达精度: < 0.3m (目标容差)
@@ -58,7 +58,7 @@ from geometry_msgs.msg import PoseStamped, Point, Quaternion
 from std_msgs.msg import Header, Bool
 
 # 自定义 Action 接口
-from g1_nav.action import PointToPoint
+from robot_interfaces.action import PointToPoint
 
 
 class PointToPointActionClient(Node):
@@ -132,7 +132,7 @@ class PointToPointActionClient(Node):
         if not self._action_client.wait_for_server(timeout_sec=timeout_sec):
             self.get_logger().error(f'❌ 超时 {timeout_sec}s, Action 服务器未响应')
             self.get_logger().error('请确认 action_nav_point_to_point 已启动:')
-            self.get_logger().error('  ros2 run g1_nav action_nav_point_to_point.py')
+            self.get_logger().error('  ros2 run navigation_controller point_to_point_action_server.py')
             return False
         
         self.get_logger().info('✅ Action 服务器已连接')
@@ -286,7 +286,7 @@ class PointToPointActionClient(Node):
         self.get_logger().info(f'任务完成: {status_names.get(result.status_code, "未知")}')
         self.get_logger().info(f'位置误差: {result.position_error:.3f} m')
         
-        if result.result ="success":
+        if result.result == "success":
             self.get_logger().info('🎉 导航成功!')
         else:
             self.get_logger().error('❌ 导航失败')
@@ -295,7 +295,7 @@ class PointToPointActionClient(Node):
         
         # 更新统计
         self.test_stats['total_tests'] += 1
-        if result.result ="success":
+        if result.result == "success":
             self.test_stats['successful_tests'] += 1
         else:
             self.test_stats['failed_tests'] += 1

@@ -32,9 +32,7 @@ PointToPoint Navigation - 键盘控制版本
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
-import sys
 import yaml
 import threading
 from pathlib import Path

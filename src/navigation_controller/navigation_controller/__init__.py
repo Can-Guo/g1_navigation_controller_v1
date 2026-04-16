@@ -1,5 +1,5 @@
 """
-g1_nav - ROS2 Navigation Package for G1 Robot
+navigation_controller - ROS2 Navigation Package for G1 Robot
 
 This package provides navigation capabilities including:
 - A* path planning

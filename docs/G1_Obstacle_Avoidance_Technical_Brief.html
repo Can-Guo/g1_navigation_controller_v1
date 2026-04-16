@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G1 Robot — Obstacle Avoidance Technical Brief</title>
+<style>
+  @page { size: A4; margin: 15mm 18mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
+    font-size: 10pt;
+    line-height: 1.45;
+    color: #1a1a1a;
+    max-width: 210mm;
+    margin: 0 auto;
+    padding: 12mm 16mm;
+    background: #fff;
+  }
+
+  /* ---- Page break ---- */
+  .page-break { page-break-before: always; margin-top: 8mm; }
+
+  /* ---- Header ---- */
+  .doc-header {
+    display: flex; justify-content: space-between; align-items: flex-end;
+    border-bottom: 2.5px solid #1a5276; padding-bottom: 5px; margin-bottom: 10px;
+  }
+  .doc-header h1 { font-size: 16pt; color: #1a5276; letter-spacing: -0.3px; }
+  .doc-header .subtitle { font-size: 9pt; color: #666; }
+
+  h2 { font-size: 12pt; color: #1a5276; margin: 12px 0 6px; border-left: 4px solid #2e86c1; padding-left: 8px; }
+  h3 { font-size: 10.5pt; color: #2c3e50; margin: 8px 0 4px; }
+  p, li { margin-bottom: 4px; }
+  ul { padding-left: 16px; }
+
+  /* ---- Flowchart container ---- */
+  .flow-container { display: flex; justify-content: center; margin: 8px 0; }
+  svg text { font-family: 'Segoe UI', Arial, sans-serif; }
+
+  /* ---- Info boxes ---- */
+  .info-row { display: flex; gap: 10px; margin: 8px 0; }
+  .info-box {
+    flex: 1; border: 1px solid #d5d8dc; border-radius: 6px; padding: 8px 10px;
+    background: #f8f9fa;
+  }
+  .info-box.highlight { background: #eaf2f8; border-color: #2e86c1; }
+  .info-box h3 { margin-top: 0; font-size: 10pt; }
+  .info-box p { font-size: 9pt; margin-bottom: 2px; }
+
+  /* ---- Table ---- */
+  table { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 9pt; }
+  th { background: #2e86c1; color: #fff; padding: 5px 8px; text-align: left; }
+  td { border: 1px solid #d5d8dc; padding: 4px 8px; }
+  tr:nth-child(even) { background: #f2f4f5; }
+
+  .caption { font-size: 8.5pt; color: #666; text-align: center; margin-top: 3px; font-style: italic; }
+  .footer { font-size: 8pt; color: #999; text-align: center; margin-top: 10px; border-top: 1px solid #ddd; padding-top: 4px; }
+
+  /* ---- Corridor diagram ---- */
+  .corridor-svg { display: block; margin: 6px auto; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================ -->
+<!-- PAGE 1                                                        -->
+<!-- ============================================================ -->
+
+<div class="doc-header">
+  <div>
+    <h1>G1 Humanoid Robot — Obstacle Avoidance System</h1>
+    <div class="subtitle">Technical Brief for Stakeholders &amp; Non-Technical Readers</div>
+  </div>
+  <div class="subtitle">Rev 1.0 — March 2026</div>
+</div>
+
+<h2>1. How the Robot "Sees" and Avoids Obstacles</h2>
+<p>
+  The G1 robot uses a <b>3D LiDAR sensor</b> (Livox MID-360) that emits laser beams 360° around the robot
+  and measures the distance to every surface it hits — like a flashlight that can measure distance.
+  The system processes this data 10 times per second through a multi-stage pipeline shown below.
+</p>
+
+<!-- ============================================================ -->
+<!-- MAIN PIPELINE FLOWCHART                                       -->
+<!-- ============================================================ -->
+<div class="flow-container">
+<svg width="520" height="370" viewBox="0 0 520 370">
+  <!-- Background -->
+  <rect x="0" y="0" width="520" height="370" fill="#fff" rx="4"/>
+
+  <!-- Stage 1: LiDAR -->
+  <rect x="10" y="15" width="120" height="48" rx="8" fill="#2e86c1" stroke="#1a5276" stroke-width="1.5"/>
+  <text x="70" y="34" text-anchor="middle" fill="#fff" font-size="10" font-weight="bold">3D LiDAR</text>
+  <text x="70" y="50" text-anchor="middle" fill="#d6eaf8" font-size="8">360° point cloud</text>
+
+  <!-- Arrow 1→2 -->
+  <line x1="130" y1="39" x2="158" y2="39" stroke="#555" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+  <!-- Stage 2: Filter -->
+  <rect x="160" y="15" width="120" height="48" rx="8" fill="#27ae60" stroke="#1e8449" stroke-width="1.5"/>
+  <text x="220" y="30" text-anchor="middle" fill="#fff" font-size="9" font-weight="bold">Triple Filter</text>
+  <text x="220" y="43" text-anchor="middle" fill="#d5f5e3" font-size="7.5">Distance &lt; 1.5m</text>
+  <text x="220" y="54" text-anchor="middle" fill="#d5f5e3" font-size="7.5">Height −0.3~0.6m · Angle ±90°</text>
+
+  <!-- Arrow 2→3 -->
+  <line x1="280" y1="39" x2="308" y2="39" stroke="#555" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+  <!-- Stage 3: Costmap -->
+  <rect x="310" y="10" width="200" height="58" rx="8" fill="#e67e22" stroke="#ca6f1e" stroke-width="1.5"/>
+  <text x="410" y="28" text-anchor="middle" fill="#fff" font-size="9" font-weight="bold">Nav2 Local Costmap</text>
+  <text x="410" y="41" text-anchor="middle" fill="#fdebd0" font-size="7.5">2D grid map (80×80 cells)</text>
+  <text x="410" y="54" text-anchor="middle" fill="#fdebd0" font-size="7.5">Obstacle → Inflate → Cost gradient</text>
+
+  <!-- Arrow 3→Decision -->
+  <line x1="410" y1="68" x2="410" y2="95" stroke="#555" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+  <!-- Decision diamond -->
+  <polygon points="410,98 480,138 410,178 340,138" fill="#f9e79f" stroke="#b7950b" stroke-width="1.5"/>
+  <text x="410" y="133" text-anchor="middle" font-size="9" font-weight="bold" fill="#7d6608">Obstacle</text>
+  <text x="410" y="148" text-anchor="middle" font-size="9" font-weight="bold" fill="#7d6608">ahead?</text>
+
+  <!-- NO branch → A* Path Following -->
+  <line x1="340" y1="138" x2="205" y2="138" stroke="#27ae60" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <text x="270" y="130" text-anchor="middle" font-size="9" fill="#27ae60" font-weight="bold">NO</text>
+  <rect x="50" y="115" width="155" height="46" rx="8" fill="#27ae60" stroke="#1e8449" stroke-width="1.5"/>
+  <text x="128" y="133" text-anchor="middle" fill="#fff" font-size="9" font-weight="bold">A* Path Following</text>
+  <text x="128" y="148" text-anchor="middle" fill="#d5f5e3" font-size="8">Straight-line to goal</text>
+
+  <!-- YES branch → DWA -->
+  <line x1="410" y1="178" x2="410" y2="205" stroke="#e74c3c" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <text x="420" y="195" font-size="9" fill="#e74c3c" font-weight="bold">YES</text>
+
+  <!-- DWA Box (large) -->
+  <rect x="145" y="208" width="365" height="150" rx="10" fill="#fdedec" stroke="#e74c3c" stroke-width="1.5"/>
+  <text x="327" y="228" text-anchor="middle" font-size="10" font-weight="bold" fill="#c0392b">DWA Obstacle Avoidance Mode</text>
+
+  <!-- DWA sub-step 1 -->
+  <rect x="158" y="238" width="105" height="38" rx="6" fill="#e74c3c"/>
+  <text x="210" y="254" text-anchor="middle" fill="#fff" font-size="8" font-weight="bold">Generate 100</text>
+  <text x="210" y="266" text-anchor="middle" fill="#fadbd8" font-size="7.5">candidate paths</text>
+  <line x1="263" y1="257" x2="278" y2="257" stroke="#c0392b" stroke-width="1.2" marker-end="url(#arrowhead)"/>
+
+  <!-- DWA sub-step 2 -->
+  <rect x="280" y="238" width="105" height="38" rx="6" fill="#e74c3c"/>
+  <text x="332" y="254" text-anchor="middle" fill="#fff" font-size="8" font-weight="bold">Score each</text>
+  <text x="332" y="266" text-anchor="middle" fill="#fadbd8" font-size="7.5">path (5 criteria)</text>
+  <line x1="385" y1="257" x2="400" y2="257" stroke="#c0392b" stroke-width="1.2" marker-end="url(#arrowhead)"/>
+
+  <!-- DWA sub-step 3 -->
+  <rect x="402" y="238" width="96" height="38" rx="6" fill="#e74c3c"/>
+  <text x="450" y="254" text-anchor="middle" fill="#fff" font-size="8" font-weight="bold">Pick best</text>
+  <text x="450" y="266" text-anchor="middle" fill="#fadbd8" font-size="7.5">safe path</text>
+
+  <!-- Scoring criteria list -->
+  <text x="168" y="296" font-size="8" fill="#922b21">Scoring criteria (weighted sum):</text>
+  <text x="168" y="308" font-size="7.5" fill="#555">① Collision safety — avoid high-cost areas on costmap</text>
+  <text x="168" y="319" font-size="7.5" fill="#555">② Goal proximity — end of path closer to destination</text>
+  <text x="168" y="330" font-size="7.5" fill="#555">③ Heading alignment — face toward destination</text>
+  <text x="168" y="341" font-size="7.5" fill="#555">④ Speed reward — prefer faster forward motion</text>
+  <text x="168" y="352" font-size="7.5" fill="#555">⑤ Smoothness — avoid sudden jerks (humanoid stability)</text>
+
+  <!-- A* box → Motor output -->
+  <line x1="128" y1="161" x2="128" y2="205" stroke="#27ae60" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <!-- DWA → Motor output -->
+  <line x1="327" y1="358" x2="327" y2="365" stroke="#c0392b" stroke-width="0"/>
+
+  <!-- Arrowhead marker -->
+  <defs>
+    <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#555"/>
+    </marker>
+  </defs>
+</svg>
+</div>
+<p class="caption">Figure 1 — Sensor-to-Decision Pipeline: how raw laser data becomes a safe movement command (10 Hz cycle)</p>
+
+<h2>2. Key Technologies at a Glance</h2>
+<div class="info-row">
+  <div class="info-box highlight">
+    <h3>🗺️ Nav2 Local Costmap</h3>
+    <p>A 4m × 4m "danger map" that moves with the robot. Each 5 cm cell stores a <b>cost value</b> (0 = safe, 254 = obstacle). Obstacles are <b>inflated</b> — like drawing a safety bubble around every wall — so the robot keeps its distance automatically.</p>
+  </div>
+  <div class="info-box highlight">
+    <h3>🧭 DWA Planner</h3>
+    <p><b>Dynamic Window Approach</b>: generates 100 candidate paths per cycle, each a smooth curve the robot could physically follow. Every path is scored for safety, goal progress, and smoothness. The highest-scoring path is executed.</p>
+  </div>
+  <div class="info-box">
+    <h3>🔄 Stuck Recovery</h3>
+    <p>If the robot detects no position change for 5 seconds despite sending commands, it enters a 3-phase escape: <b>reverse → rotate toward clearest direction → advance</b>. Clearance direction is chosen by sampling the costmap in 8 sectors around the robot.</p>
+  </div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- PAGE 2                                                        -->
+<!-- ============================================================ -->
+<div class="page-break"></div>
+
+<div class="doc-header">
+  <div><h1>G1 Obstacle Avoidance — Safety Layers &amp; Corridor Navigation</h1></div>
+  <div class="subtitle">Page 2 of 2</div>
+</div>
+
+<h2>3. The Costmap "Safety Bubble" — How the Robot Keeps Distance</h2>
+<p>
+  The costmap wraps every detected obstacle in a graduated <b>inflation zone</b>.
+  The robot treats areas with higher cost as more dangerous and naturally steers toward lower-cost (safer) zones.
+  This is the same industry-standard technique used by the <b>ROS 2 Navigation Stack (Nav2)</b>.
+</p>
+
+<!-- Inflation cross-section diagram -->
+<div class="flow-container">
+<svg width="500" height="145" viewBox="0 0 500 145">
+  <defs>
+    <linearGradient id="inflGrad" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0%" stop-color="#e74c3c"/>
+      <stop offset="15%" stop-color="#e74c3c"/>
+      <stop offset="15%" stop-color="#e67e22"/>
+      <stop offset="40%" stop-color="#f4d03f"/>
+      <stop offset="65%" stop-color="#82e0aa"/>
+      <stop offset="100%" stop-color="#d5f5e3"/>
+    </linearGradient>
+  </defs>
+  <!-- Ground bar -->
+  <rect x="50" y="30" width="400" height="50" rx="4" fill="url(#inflGrad)" stroke="#888" stroke-width="1"/>
+  <!-- Obstacle core -->
+  <rect x="50" y="30" width="30" height="50" rx="2" fill="#922b21"/>
+  <text x="65" y="60" text-anchor="middle" fill="#fff" font-size="8" font-weight="bold">Wall</text>
+
+  <!-- Labels along the bar -->
+  <text x="80" y="23" font-size="7.5" fill="#c0392b" font-weight="bold">254</text>
+  <text x="80" y="95" font-size="7" fill="#555">0 m</text>
+
+  <line x1="120" y1="30" x2="120" y2="85" stroke="#e67e22" stroke-dasharray="3,2" stroke-width="0.8"/>
+  <text x="120" y="23" font-size="7.5" fill="#e67e22" font-weight="bold">253 (INSCRIBED)</text>
+  <text x="120" y="95" font-size="7" fill="#555">0.30 m</text>
+  <text x="120" y="105" font-size="6.5" fill="#888">(= robot half-width)</text>
+
+  <line x1="240" y1="30" x2="240" y2="85" stroke="#a0a0a0" stroke-dasharray="3,2" stroke-width="0.8"/>
+  <text x="240" y="23" font-size="7.5" fill="#888">~113</text>
+  <text x="240" y="95" font-size="7" fill="#555">0.40 m</text>
+
+  <line x1="310" y1="30" x2="310" y2="85" stroke="#27ae60" stroke-dasharray="3,2" stroke-width="0.8"/>
+  <text x="310" y="23" font-size="7.5" fill="#27ae60" font-weight="bold">0 (FREE)</text>
+  <text x="310" y="95" font-size="7" fill="#555">0.45 m</text>
+  <text x="310" y="105" font-size="6.5" fill="#888">(= inflation_radius)</text>
+
+  <!-- Arrow span -->
+  <line x1="82" y1="117" x2="308" y2="117" stroke="#2e86c1" stroke-width="1" marker-end="url(#arrowhead)"/>
+  <line x1="82" y1="114" x2="82" y2="120" stroke="#2e86c1" stroke-width="1"/>
+  <text x="195" y="130" text-anchor="middle" font-size="8" fill="#2e86c1" font-weight="bold">Inflation zone — exponential decay gradient</text>
+
+  <!-- Safe zone label -->
+  <rect x="315" y="35" width="130" height="40" rx="4" fill="#d5f5e3" stroke="#27ae60" stroke-width="1"/>
+  <text x="380" y="52" text-anchor="middle" font-size="8.5" fill="#1e8449" font-weight="bold">Safe Zone</text>
+  <text x="380" y="64" text-anchor="middle" font-size="7.5" fill="#555">Cost = 0, free to travel</text>
+</svg>
+</div>
+<p class="caption">Figure 2 — Costmap inflation cross-section: cost decreases exponentially from obstacle surface. Robot prefers zero-cost areas.</p>
+
+<h2>4. Corridor Navigation — The Hardest Scenario</h2>
+<p>
+  In a <b>1.0 m wide corridor</b>, the G1 robot (width 0.55 m) has only <b>22.5 cm clearance per side</b>.
+  The system uses three coordinated mechanisms to traverse safely:
+</p>
+
+<!-- Corridor cross-section SVG -->
+<div class="flow-container">
+<svg width="440" height="140" viewBox="0 0 440 140">
+  <!-- Left wall -->
+  <rect x="10" y="10" width="20" height="120" fill="#922b21" rx="2"/>
+  <text x="20" y="75" text-anchor="middle" fill="#fff" font-size="7" font-weight="bold" transform="rotate(-90,20,75)">LEFT WALL</text>
+  <!-- Right wall -->
+  <rect x="410" y="10" width="20" height="120" fill="#922b21" rx="2"/>
+  <text x="420" y="75" text-anchor="middle" fill="#fff" font-size="7" font-weight="bold" transform="rotate(-90,420,75)">RIGHT WALL</text>
+
+  <!-- Inflation from left -->
+  <rect x="30" y="10" width="135" height="120" fill="#fdebd0" rx="0"/>
+  <rect x="30" y="10" width="70" height="120" fill="#fadbd8" rx="0"/>
+  <!-- Inflation from right -->
+  <rect x="275" y="10" width="135" height="120" fill="#fdebd0" rx="0"/>
+  <rect x="340" y="10" width="70" height="120" fill="#fadbd8" rx="0"/>
+
+  <!-- Zero-cost center -->
+  <rect x="165" y="10" width="110" height="120" fill="#d5f5e3" stroke="#27ae60" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="220" y="30" text-anchor="middle" font-size="8" fill="#1e8449" font-weight="bold">Zero-Cost Channel</text>
+  <text x="220" y="42" text-anchor="middle" font-size="7" fill="#555">(10 cm wide)</text>
+
+  <!-- Robot -->
+  <rect x="180" y="48" width="80" height="44" rx="6" fill="#2e86c1" stroke="#1a5276" stroke-width="1.5"/>
+  <text x="220" y="67" text-anchor="middle" fill="#fff" font-size="9" font-weight="bold">G1 Robot</text>
+  <text x="220" y="80" text-anchor="middle" fill="#d6eaf8" font-size="7">0.55 m wide</text>
+
+  <!-- Dimension lines -->
+  <line x1="30" y1="137" x2="410" y2="137" stroke="#333" stroke-width="0.8"/>
+  <line x1="30" y1="133" x2="30" y2="140" stroke="#333" stroke-width="0.8"/>
+  <line x1="410" y1="133" x2="410" y2="140" stroke="#333" stroke-width="0.8"/>
+  <text x="220" y="137" text-anchor="middle" font-size="8" fill="#333" font-weight="bold">1.0 m corridor</text>
+
+  <!-- Clearance arrows -->
+  <line x1="30" y1="70" x2="178" y2="70" stroke="#e67e22" stroke-width="0.8" stroke-dasharray="3,2"/>
+  <text x="100" y="100" text-anchor="middle" font-size="7" fill="#e67e22">22.5cm clearance</text>
+  <line x1="262" y1="70" x2="410" y2="70" stroke="#e67e22" stroke-width="0.8" stroke-dasharray="3,2"/>
+  <text x="340" y="100" text-anchor="middle" font-size="7" fill="#e67e22">22.5cm clearance</text>
+
+  <!-- Legend -->
+  <rect x="30" y="2" width="8" height="6" fill="#fadbd8"/><text x="42" y="8" font-size="6.5" fill="#555">INSCRIBED (cost 253)</text>
+  <rect x="130" y="2" width="8" height="6" fill="#fdebd0"/><text x="142" y="8" font-size="6.5" fill="#555">Inflation gradient</text>
+  <rect x="250" y="2" width="8" height="6" fill="#d5f5e3"/><text x="262" y="8" font-size="6.5" fill="#555">Free (cost 0)</text>
+</svg>
+</div>
+<p class="caption">Figure 3 — Corridor cross-section: inflation from both walls creates a safe central channel that guides the robot</p>
+
+<h3>Three Coordinated Safety Mechanisms</h3>
+<table>
+  <tr>
+    <th style="width:5%">#</th>
+    <th style="width:22%">Mechanism</th>
+    <th style="width:38%">What It Does</th>
+    <th style="width:35%">Corridor Behaviour</th>
+  </tr>
+  <tr>
+    <td>1</td>
+    <td><b>A* Global Path</b></td>
+    <td>Plans the shortest collision-free route on the static map, automatically routing through corridor center.</td>
+    <td>Provides a centerline reference. Robot follows this line when no dynamic obstacle is present.</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td><b>Costmap Gradient</b></td>
+    <td>Inflates every wall with an exponential cost field. DWA trajectory scoring penalizes paths entering high-cost zones.</td>
+    <td>Creates a "magnetic center" effect — if robot drifts sideways, the cost gradient gently pushes it back to center.</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td><b>Narrow-Cone Detection</b></td>
+    <td>Scans only ±30° ahead (not ±90°) and requires ≥ 8 high-cost samples to trigger DWA avoidance mode.</td>
+    <td>Side walls are <b>not</b> detected as obstacles → robot stays in smooth A* tracking mode. Only a person or box directly ahead triggers active avoidance.</td>
+  </tr>
+</table>
+
+<h2>5. Safety Parameter Summary</h2>
+<table>
+  <tr><th>Parameter</th><th>Value</th><th>Physical Meaning</th></tr>
+  <tr><td>Robot width</td><td>0.55 m</td><td>Shoulder-to-shoulder width of G1 humanoid</td></tr>
+  <tr><td>robot_radius</td><td>0.30 m</td><td>Half-width (0.275m) + 2.5cm safety margin → INSCRIBED zone boundary</td></tr>
+  <tr><td>inflation_radius</td><td>0.45 m</td><td>Outer edge of cost gradient; beyond this distance, cost = 0 (free)</td></tr>
+  <tr><td>cost_scaling_factor</td><td>8.0</td><td>Steepness of cost decay — higher = narrower danger zone around walls</td></tr>
+  <tr><td>Detection cone</td><td>±30°</td><td>Forward scan angle — ignores side walls in corridors</td></tr>
+  <tr><td>Min. trigger samples</td><td>8</td><td>Minimum high-cost hits to activate DWA — filters wall edges</td></tr>
+  <tr><td>Max. speed</td><td>0.20 m/s</td><td>Conservative speed limit for humanoid stability</td></tr>
+  <tr><td>Control frequency</td><td>10 Hz</td><td>Decision & command update rate (100 ms reaction time)</td></tr>
+</table>
+
+<h2>6. System Behaviour Summary</h2>
+<div class="info-row">
+  <div class="info-box" style="border-left: 4px solid #27ae60;">
+    <h3>✅ Open Area</h3>
+    <p>A* path → straight-line to goal. No DWA activation. Full speed (0.20 m/s).</p>
+  </div>
+  <div class="info-box" style="border-left: 4px solid #2e86c1;">
+    <h3>✅ Narrow Corridor</h3>
+    <p>A* path through center. Costmap gradient centers the robot. DWA stays off. Steady forward motion.</p>
+  </div>
+  <div class="info-box" style="border-left: 4px solid #e67e22;">
+    <h3>⚠️ Obstacle Ahead</h3>
+    <p>DWA activates. 100 paths scored. Best path curves around obstacle while staying away from walls.</p>
+  </div>
+  <div class="info-box" style="border-left: 4px solid #e74c3c;">
+    <h3>🛑 Robot Stuck</h3>
+    <p>Escape mode: reverse → rotate to clearest direction → advance. Auto-resumes normal navigation.</p>
+  </div>
+</div>
+
+<div class="footer">
+  G1 Navigation System — Obstacle Avoidance Technical Brief — Confidential — Rev 1.0 — March 2026
+</div>
+
+</body>
+</html>

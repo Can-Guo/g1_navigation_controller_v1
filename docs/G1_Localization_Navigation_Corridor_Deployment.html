@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Technical Proposal — G1 Localization &amp; Navigation Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy: #0c1e33;
+    --navy-mid: #1a3a5c;
+    --gold: #c9a227;
+    --gold-light: #e8d48b;
+    --teal: #1e7a7a;
+    --blue: #2c6fbb;
+    --slate: #5c6b7a;
+    --bg: #f4f6f9;
+    --card: #ffffff;
+    --border: #dce2eb;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.55;
+    color: #1a2332;
+    background: var(--bg);
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 0 20px 56px;
+  }
+
+  /* --- Proposal cover --- */
+  .cover {
+    background: linear-gradient(135deg, var(--navy) 0%, var(--navy-mid) 55%, #243d5c 100%);
+    color: #fff;
+    padding: 36px 40px 40px;
+    border-radius: 0 0 16px 16px;
+    margin: 0 -20px 28px;
+    box-shadow: 0 12px 40px rgba(12,30,51,0.25);
+  }
+  .cover .badge-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+  .badge {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 5px 12px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(201,162,39,0.45);
+    color: var(--gold-light);
+  }
+  .cover h1 {
+    font-size: 1.65rem;
+    font-weight: 700;
+    line-height: 1.25;
+    max-width: 720px;
+    margin-bottom: 12px;
+  }
+  .cover .subtitle { font-size: 0.95rem; opacity: 0.88; max-width: 680px; line-height: 1.5; }
+  .cover .doc-ref {
+    margin-top: 22px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255,255,255,0.15);
+    font-size: 0.78rem;
+    opacity: 0.75;
+    display: flex; flex-wrap: wrap; gap: 16px;
+  }
+
+  /* --- Value strip --- */
+  .value-strip {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin: -10px 0 28px;
+    position: relative;
+    z-index: 1;
+  }
+  @media (max-width: 720px) { .value-strip { grid-template-columns: 1fr; } }
+  .value-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    box-shadow: 0 4px 16px rgba(12,30,51,0.06);
+    border-top: 3px solid var(--gold);
+  }
+  .value-card h3 { font-size: 0.78rem; color: var(--navy); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+  .value-card p { font-size: 0.88rem; color: var(--slate); line-height: 1.45; }
+
+  h2 {
+    font-size: 1.12rem;
+    color: var(--navy);
+    margin: 32px 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--gold);
+    display: flex; align-items: center; gap: 10px;
+  }
+  h2 .num { background: var(--navy); color: var(--gold); width: 28px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.85rem; font-weight: 700; }
+  h3 { font-size: 0.98rem; color: var(--navy-mid); margin: 18px 0 8px; }
+
+  p { margin-bottom: 10px; color: #2d3748; }
+  ul, ol { margin: 8px 0 12px 20px; color: #2d3748; }
+  li { margin-bottom: 5px; }
+
+  .lead {
+    font-size: 1.02rem;
+    color: var(--navy-mid);
+    border-left: 4px solid var(--teal);
+    padding: 12px 16px;
+    background: #fff;
+    border-radius: 0 8px 8px 0;
+    margin: 16px 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  }
+
+  /* --- Tech tags --- */
+  .tech-bar { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 14px; }
+  .tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: #e8eef5;
+    color: var(--navy-mid);
+    border: 1px solid #cdd8e6;
+  }
+  .tag.lib { background: #e6f4f4; border-color: #9cc; color: #0d5c5c; }
+  .tag.ros { background: #e8f0fc; border-color: #8ab4e8; color: #1a4a8c; }
+
+  /* --- Figure container --- */
+  .figure-wrap {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 16px 16px;
+    margin: 18px 0;
+    overflow-x: auto;
+    box-shadow: 0 4px 20px rgba(12,30,51,0.05);
+  }
+  .figure-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--gold);
+    margin-bottom: 4px;
+  }
+  .figure-wrap > svg { display: block; margin: 0 auto; }
+  .caption {
+    font-size: 0.8rem;
+    color: var(--slate);
+    text-align: center;
+    margin-top: 12px;
+    font-style: italic;
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+    line-height: 1.45;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin: 12px 0; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+  th { background: var(--navy); color: #fff; text-align: left; padding: 10px 12px; font-weight: 600; font-size: 0.82rem; }
+  td { border: 1px solid var(--border); padding: 9px 12px; vertical-align: top; }
+  tr:nth-child(even) td { background: #fafbfd; }
+  td code { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; background: #f0f3f7; padding: 1px 5px; border-radius: 3px; }
+
+  .callout {
+    background: linear-gradient(90deg, #fff9e6 0%, #fff 100%);
+    border: 1px solid var(--gold-light);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 14px 0;
+    font-size: 0.9rem;
+  }
+  .callout strong { color: var(--navy); }
+
+  footer {
+    margin-top: 40px;
+    padding: 20px;
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--slate);
+    border-top: 1px solid var(--border);
+  }
+  footer .conf { opacity: 0.85; }
+
+  svg text { font-family: 'Inter', 'Segoe UI', sans-serif; }
+  .mono { font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; }
+</style>
+</head>
+<body>
+
+<!-- ========== COVER / PROPOSAL HEADER ========== -->
+<div class="cover">
+  <div class="badge-row">
+    <span class="badge">Technical proposal</span>
+    <span class="badge">ROS 2 Humble</span>
+    <span class="badge">Humanoid industrial mobility</span>
+  </div>
+  <h1>Localization &amp; Navigation Architecture for Unitree G1 in Narrow Corridors</h1>
+  <p class="subtitle">
+    A client-facing overview of the sensing, mapping, planning, and control stack — designed for tender review,
+    stakeholder alignment, and deployment in structured environments (1&nbsp;m corridors, crab-style motion, machine-facing).
+  </p>
+  <div class="doc-ref">
+    <span>Deliverable: System architecture &amp; data-flow specification</span>
+    <span>Stack: <span class="mono">navigation_controller</span> + Nav2 ecosystem + custom planners</span>
+  </div>
+</div>
+
+<div class="value-strip">
+  <div class="value-card">
+    <h3>For operations</h3>
+    <p>Repeatable, map-based positioning so the robot always knows where it is relative to machines and corridors.</p>
+  </div>
+  <div class="value-card">
+    <h3>For safety</h3>
+    <p>Layered obstacle handling: global map constraints + real-time LiDAR costmap + behaviour overrides.</p>
+  </div>
+  <div class="value-card">
+    <h3>For integration</h3>
+    <p>Standard ROS&nbsp;2 interfaces (<code>nav_msgs</code>, <code>geometry_msgs</code>, <code>tf2</code>) — vendor-neutral and audit-friendly.</p>
+  </div>
+</div>
+
+<p class="lead">
+  <strong>Plain-language summary:</strong> The robot builds a mental “floor plan” (map), uses a spinning laser to know its position on that plan,
+  plans a route to the goal, checks for unexpected obstacles, then sends motion commands to the G1 locomotion layer.
+  The diagrams below show <em>which software blocks</em> perform each step and <em>which industry-standard libraries</em> they rely on.
+</p>
+
+<!-- ========== SECTION: MAIN ARCHITECTURE ========== -->
+<h2><span class="num">1</span> End-to-end system architecture (swimlane view)</h2>
+<p>
+  Each <strong>horizontal band</strong> is a functional layer. Data generally flows <strong>left → right</strong> and <strong>top → bottom</strong> through sensing, state estimation, planning, and actuation.
+  Package names follow ROS&nbsp;2 conventions; techniques are called out in italics inside each block.
+</p>
+<div class="tech-bar">
+  <span class="tag ros">rclpy / rclcpp</span>
+  <span class="tag ros">ament_cmake</span>
+  <span class="tag ros">tf2_ros</span>
+  <span class="tag ros">nav_msgs · sensor_msgs · geometry_msgs</span>
+  <span class="tag lib">NumPy · SciPy</span>
+  <span class="tag lib">Unitree SDK2 (optional hardware)</span>
+</div>
+
+<div class="figure-wrap">
+  <div class="figure-title">Figure 1 — Full stack (localization + navigation)</div>
+  <svg width="900" height="520" viewBox="0 0 900 520" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="laneLoc" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="#e8f4fc"/><stop offset="100%" stop-color="#d4e8f7"/></linearGradient>
+      <linearGradient id="laneNav" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="#e8faf8"/><stop offset="100%" stop-color="#d0f0ec"/></linearGradient>
+      <linearGradient id="laneAct" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="#fdf6e8"/><stop offset="100%" stop-color="#fcefd9"/></linearGradient>
+      <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%"><feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.12"/></filter>
+      <marker id="arr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#4a5568"/></marker>
+      <marker id="arrG" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2d7a5e"/></marker>
+    </defs>
+
+    <!-- Swimlane backgrounds -->
+    <rect x="8" y="8" width="884" height="118" rx="10" fill="url(#laneLoc)" stroke="#7eb8d9" stroke-width="1.2"/>
+    <text x="22" y="28" font-size="11" font-weight="700" fill="#0c1e33">LAYER A — Perception &amp; localization</text>
+    <text x="22" y="44" font-size="8" fill="#4a5568">Answer: “Where am I on the facility map, and how am I oriented?”</text>
+
+    <rect x="8" y="138" width="884" height="128" rx="10" fill="#f0f4f8" stroke="#b8c5d6" stroke-width="1.2"/>
+    <text x="22" y="158" font-size="11" font-weight="700" fill="#0c1e33">LAYER B — Global map &amp; state fusion</text>
+    <text x="22" y="174" font-size="8" fill="#4a5568">Answer: “What is walkable space, and what is a smooth fused pose for control?”</text>
+
+    <rect x="8" y="278" width="884" height="138" rx="10" fill="url(#laneNav)" stroke="#7ec4b8" stroke-width="1.2"/>
+    <text x="22" y="298" font-size="11" font-weight="700" fill="#0c1e33">LAYER C — Navigation (global + local)</text>
+    <text x="22" y="314" font-size="8" fill="#4a5568">Answer: “Which route, and how do I avoid unexpected obstacles in real time?”</text>
+
+    <rect x="8" y="428" width="884" height="82" rx="10" fill="url(#laneAct)" stroke="#deb887" stroke-width="1.2"/>
+    <text x="22" y="448" font-size="11" font-weight="700" fill="#0c1e33">LAYER D — Motion execution (G1)</text>
+    <text x="22" y="464" font-size="8" fill="#4a5568">Answer: “Convert planned velocities into humanoid steps / strafe / turn.”</text>
+
+    <!-- Blocks Layer A -->
+    <g filter="url(#shadow)">
+      <rect x="24" y="58" width="130" height="58" rx="8" fill="#fff" stroke="#2c6fbb" stroke-width="1.5"/>
+      <text x="89" y="78" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">livox_ros_driver2</text>
+      <text x="89" y="92" text-anchor="middle" font-size="7" fill="#4a5568">Package · LiDAR driver</text>
+      <text x="89" y="104" text-anchor="middle" font-size="6.5" fill="#718096" font-style="italic">PointCloud2 / CustomMsg</text>
+    </g>
+    <line x1="154" y1="87" x2="178" y2="87" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arr)"/>
+
+    <g filter="url(#shadow)">
+      <rect x="180" y="52" width="148" height="70" rx="8" fill="#fff" stroke="#1a3a5c" stroke-width="1.5"/>
+      <text x="254" y="72" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">mid360_locate</text>
+      <text x="254" y="86" text-anchor="middle" font-size="7" fill="#4a5568">locate_node · PCD map</text>
+      <text x="254" y="98" text-anchor="middle" font-size="6.5" fill="#718096" font-style="italic">NDT registration · scan-to-map</text>
+      <text x="254" y="110" text-anchor="middle" font-size="6" fill="#2c5282" font-family="JetBrains Mono, monospace">/odometry/map · /aligned</text>
+    </g>
+    <line x1="328" y1="87" x2="352" y2="87" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arr)"/>
+
+    <g filter="url(#shadow)">
+      <rect x="354" y="52" width="160" height="70" rx="8" fill="#fff" stroke="#2d8659" stroke-width="1.5"/>
+      <text x="434" y="72" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">robot_localization</text>
+      <text x="434" y="86" text-anchor="middle" font-size="7" fill="#4a5568">ekf_node (EKF filter)</text>
+      <text x="434" y="98" text-anchor="middle" font-size="6.5" fill="#718096" font-style="italic">Fuse LiDAR pose + IMU ω</text>
+      <text x="434" y="110" text-anchor="middle" font-size="6" fill="#276749" font-family="JetBrains Mono, monospace">/odometry/ekf · map→odom TF</text>
+    </g>
+    <line x1="514" y1="87" x2="538" y2="87" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arr)"/>
+
+    <g filter="url(#shadow)">
+      <rect x="540" y="58" width="150" height="58" rx="8" fill="#fff" stroke="#805ad5" stroke-width="1.5"/>
+      <text x="615" y="78" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">tf2_ros</text>
+      <text x="615" y="92" text-anchor="middle" font-size="7" fill="#4a5568">Transform tree</text>
+      <text x="615" y="104" text-anchor="middle" font-size="6.5" fill="#718096" font-style="italic">map→odom→base_link→sensors</text>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="708" y="58" width="172" height="58" rx="8" fill="#fff" stroke="#c9a227" stroke-width="1.5"/>
+      <text x="794" y="78" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">static_transform_publisher</text>
+      <text x="794" y="92" text-anchor="middle" font-size="7" fill="#4a5568">tf2_ros · kinematic chain</text>
+      <text x="794" y="104" text-anchor="middle" font-size="6.5" fill="#718096" font-style="italic">base_link ↔ pelvis ↔ lidar</text>
+    </g>
+
+    <!-- Layer B -->
+    <g filter="url(#shadow)">
+      <rect x="24" y="188" width="155" height="68" rx="8" fill="#fff" stroke="#2c6fbb" stroke-width="1.5"/>
+      <text x="101" y="208" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">nav2_map_server</text>
+      <text x="101" y="222" text-anchor="middle" font-size="7" fill="#4a5568">Nav2 stack · lifecycle</text>
+      <text x="101" y="234" text-anchor="middle" font-size="6.5" fill="#718096" font-style="italic">OccupancyGrid from YAML+PGM</text>
+      <text x="101" y="246" text-anchor="middle" font-size="6" fill="#2c5282" font-family="JetBrains Mono, monospace">/map</text>
+    </g>
+    <g filter="url(#shadow)">
+      <rect x="195" y="188" width="155" height="68" rx="8" fill="#fff" stroke="#718096" stroke-width="1.5"/>
+      <text x="272" y="208" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">nav2_lifecycle_manager</text>
+      <text x="272" y="222" text-anchor="middle" font-size="7" fill="#4a5568">Activates map_server</text>
+      <text x="272" y="236" text-anchor="middle" font-size="6.5" fill="#718096" font-style="italic">Bond · autostart</text>
+    </g>
+    <g filter="url(#shadow)">
+      <rect x="366" y="188" width="200" height="68" rx="8" fill="#fff" stroke="#1a7a7a" stroke-width="1.5"/>
+      <text x="466" y="208" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">Robot pose for planning</text>
+      <text x="466" y="222" text-anchor="middle" font-size="7" fill="#4a5568">Subscribes odometry + map</text>
+      <text x="466" y="236" text-anchor="middle" font-size="6.5" fill="#718096" font-style="italic">Same world frame for goal &amp; path</text>
+    </g>
+    <line x1="580" y1="222" x2="610" y2="222" stroke="#2d7a5e" stroke-width="2" marker-end="url(#arrG)"/>
+    <text x="640" y="218" font-size="8" fill="#276749" font-weight="600">Feeds planners</text>
+
+    <!-- Layer C -->
+    <g filter="url(#shadow)">
+      <rect x="24" y="332" width="168" height="72" rx="8" fill="#fff" stroke="#1a3a5c" stroke-width="1.5"/>
+      <text x="108" y="352" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">navigation_controller</text>
+      <text x="108" y="366" text-anchor="middle" font-size="8" font-weight="600" fill="#2c5282">astar_planner_ros2*.py</text>
+      <text x="108" y="380" text-anchor="middle" font-size="6.5" fill="#718096" font-style="italic">A* · SciPy inflate · heuristic</text>
+      <text x="108" y="392" text-anchor="middle" font-size="6" fill="#276749" font-family="JetBrains Mono, monospace">/astar_path</text>
+    </g>
+    <line x1="192" y1="368" x2="218" y2="368" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arr)"/>
+
+    <g filter="url(#shadow)">
+      <rect x="220" y="326" width="185" height="84" rx="8" fill="#fff" stroke="#c05621" stroke-width="1.5"/>
+      <text x="312" y="346" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">navigation_controller</text>
+      <text x="312" y="360" text-anchor="middle" font-size="8" font-weight="600" fill="#9c4221">dwa_planner_ros2_mid360.py</text>
+      <text x="312" y="374" text-anchor="middle" font-size="6.5" fill="#718096" font-style="italic">DWA + Nav2-style LocalCostmap</text>
+      <text x="312" y="386" text-anchor="middle" font-size="6.5" fill="#718096" font-style="italic">SciPy EDT inflation · rolling window</text>
+      <text x="312" y="398" text-anchor="middle" font-size="6" fill="#276749" font-family="JetBrains Mono, monospace">/dwa_cmd_vel · /dwa_local_costmap</text>
+    </g>
+    <line x1="405" y1="368" x2="432" y2="368" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arr)"/>
+
+    <g filter="url(#shadow)">
+      <rect x="434" y="326" width="200" height="84" rx="8" fill="#fff" stroke="#2d7a5e" stroke-width="1.5"/>
+      <text x="534" y="346" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">navigation_controller</text>
+      <text x="534" y="360" text-anchor="middle" font-size="8" font-weight="600" fill="#276749">g1_position_control_ros2*.py</text>
+      <text x="534" y="374" text-anchor="middle" font-size="6.5" fill="#718096" font-style="italic">Euclidean OR Manhattan (crab)</text>
+      <text x="534" y="386" text-anchor="middle" font-size="6.5" fill="#718096" font-style="italic">DWA override when avoiding</text>
+      <text x="534" y="398" text-anchor="middle" font-size="6" fill="#276749" font-family="JetBrains Mono, monospace">/cmd_vel</text>
+    </g>
+    <line x1="634" y1="368" x2="658" y2="368" stroke="#4a5568" stroke-width="1.5" marker-end="url(#arr)"/>
+
+    <g filter="url(#shadow)">
+      <rect x="660" y="332" width="210" height="72" rx="8" fill="#fff" stroke="#c9a227" stroke-width="1.5"/>
+      <text x="765" y="352" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">Optional: robot_interfaces</text>
+      <text x="765" y="366" text-anchor="middle" font-size="7" fill="#4a5568">point_to_point_action_server</text>
+      <text x="765" y="378" text-anchor="middle" font-size="6.5" fill="#718096" font-style="italic">ROS 2 Actions · task API</text>
+      <text x="765" y="390" text-anchor="middle" font-size="6" fill="#276749" font-family="JetBrains Mono, monospace">Navigate-to-pose style tasks</text>
+    </g>
+
+    <!-- Layer D -->
+    <g filter="url(#shadow)">
+      <rect x="24" y="448" width="280" height="52" rx="8" fill="#fff" stroke="#b7791f" stroke-width="1.5"/>
+      <text x="164" y="470" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">unitree_sdk2py (optional)</text>
+      <text x="164" y="486" text-anchor="middle" font-size="7" fill="#4a5568">LocoClient · G1 low-level locomotion · DDS</text>
+    </g>
+    <g filter="url(#shadow)">
+      <rect x="318" y="448" width="280" height="52" rx="8" fill="#fff" stroke="#718096" stroke-width="1.5"/>
+      <text x="458" y="470" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">Simulation / bench</text>
+      <text x="458" y="486" text-anchor="middle" font-size="7" fill="#4a5568">geometry_msgs/Twist on /cmd_vel only</text>
+    </g>
+    <g filter="url(#shadow)">
+      <rect x="612" y="448" width="268" height="52" rx="8" fill="#fff" stroke="#2c5282" stroke-width="1.5"/>
+      <text x="746" y="470" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">Physical G1</text>
+      <text x="746" y="486" text-anchor="middle" font-size="7" fill="#4a5568">Forward · back · strafe · turn (policy-dependent)</text>
+    </g>
+  </svg>
+  <p class="caption">
+    <strong>How to read this:</strong> Layer&nbsp;A produces pose and aligned point clouds; Layer&nbsp;B supplies the global grid and fused odometry;
+    Layer&nbsp;C runs custom A* and DWA (with a Python costmap compatible with Nav2 semantics); Layer&nbsp;D sends commands to the robot SDK or simulation.
+    Orange paths highlight Nav2 ecosystem components often used in industrial ROS&nbsp;2 deployments.
+  </p>
+</div>
+
+<!-- ========== LOCALIZATION DETAIL ========== -->
+<h2><span class="num">2</span> Localization module — detailed flow</h2>
+<p>
+  Non-technical readers can think of this as <strong>“GPS indoors”</strong>: instead of satellites, the robot matches laser scans to a pre-recorded 3D map of the building.
+  The <strong>EKF</strong> (Extended Kalman Filter) smooths jitter so displays and controllers do not “jump.”
+</p>
+
+<div class="figure-wrap">
+  <div class="figure-title">Figure 2 — Localization pipeline (packages &amp; messages)</div>
+  <svg width="880" height="300" viewBox="0 0 880 300">
+    <defs>
+      <marker id="a2" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 9 3, 0 6" fill="#4a5568"/></marker>
+    </defs>
+    <rect x="10" y="10" width="860" height="280" rx="12" fill="#fafbfd" stroke="#dce2eb"/>
+
+    <!-- Row 1 sensors -->
+    <text x="30" y="38" font-size="10" font-weight="700" fill="#0c1e33">Sensors</text>
+    <rect x="30" y="48" width="200" height="56" rx="8" fill="#fff" stroke="#2c6fbb" stroke-width="1.3"/>
+    <text x="130" y="68" text-anchor="middle" font-size="9" font-weight="700">Livox MID-360</text>
+    <text x="130" y="82" text-anchor="middle" font-size="7" fill="#4a5568">sensor_msgs/PointCloud2</text>
+    <text x="130" y="94" text-anchor="middle" font-size="6.5" fill="#718096">livox_ros_driver2</text>
+
+    <rect x="250" y="48" width="200" height="56" rx="8" fill="#fff" stroke="#2c6fbb" stroke-width="1.3"/>
+    <text x="350" y="68" text-anchor="middle" font-size="9" font-weight="700">Livox IMU</text>
+    <text x="350" y="82" text-anchor="middle" font-size="7" fill="#4a5568">sensor_msgs/Imu</text>
+    <text x="350" y="94" text-anchor="middle" font-size="6.5" fill="#718096">High-rate ω → EKF</text>
+
+    <!-- Arrows down -->
+    <line x1="130" y1="104" x2="130" y2="128" stroke="#4a5568" marker-end="url(#a2)"/>
+    <line x1="350" y1="104" x2="400" y2="128" stroke="#4a5568"/>
+    <line x1="400" y1="128" x2="400" y2="168" stroke="#4a5568" marker-end="url(#a2)"/>
+
+    <!-- mid360 -->
+    <rect x="30" y="128" width="200" height="72" rx="8" fill="#1a3a5c" stroke="#0c1e33"/>
+    <text x="130" y="152" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">mid360_locate</text>
+    <text x="130" y="168" text-anchor="middle" fill="#a8d5f0" font-size="7">Technique: point-to-map registration (e.g. NDT)</text>
+    <text x="130" y="182" text-anchor="middle" fill="#a8d5f0" font-size="6.5" font-family="JetBrains Mono, monospace">/odometry/map</text>
+    <text x="130" y="194" text-anchor="middle" fill="#a8d5f0" font-size="6.5" font-family="JetBrains Mono, monospace">/aligned · TF map→base</text>
+
+    <!-- EKF -->
+    <rect x="250" y="128" width="300" height="72" rx="8" fill="#276749" stroke="#1e563f"/>
+    <text x="400" y="152" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">robot_localization / ekf_node</text>
+    <text x="400" y="168" text-anchor="middle" fill="#c6f6d5" font-size="7">Fusion: LiDAR (x,y,yaw) + IMU (gyro)</text>
+    <text x="400" y="182" text-anchor="middle" fill="#c6f6d5" font-size="6.5" font-family="JetBrains Mono, monospace">/odometry/ekf · publish_tf</text>
+    <text x="400" y="194" text-anchor="middle" fill="#c6f6d5" font-size="6.5">config: ekf_localization.yaml</text>
+
+    <rect x="570" y="128" width="280" height="72" rx="8" fill="#fff" stroke="#805ad5" stroke-width="1.3"/>
+    <text x="710" y="150" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">tf2 / tf2_ros</text>
+    <text x="710" y="166" text-anchor="middle" font-size="7" fill="#4a5568">Transforms for RViz, planners, DWA</text>
+    <text x="710" y="182" text-anchor="middle" font-size="6.5" fill="#718096" font-family="JetBrains Mono, monospace">map → odom → base_link</text>
+
+    <!-- Bottom: map server -->
+    <line x1="710" y1="200" x2="710" y2="220" stroke="#805ad5" stroke-dasharray="4,3"/>
+    <rect x="480" y="220" width="370" height="62" rx="8" fill="#fff" stroke="#2c6fbb" stroke-width="1.3"/>
+    <text x="665" y="242" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">nav2_map_server + nav2_lifecycle_manager</text>
+    <text x="665" y="258" text-anchor="middle" font-size="7" fill="#4a5568">nav_msgs/OccupancyGrid · global planning frame</text>
+    <text x="665" y="272" text-anchor="middle" font-size="6.5" fill="#718096" font-family="JetBrains Mono, monospace">/map</text>
+
+    <text x="30" y="242" font-size="9" font-weight="700" fill="#0c1e33">Why EKF?</text>
+    <text x="30" y="258" font-size="7.5" fill="#4a5568">LiDAR pose updates arrive at a few Hz; IMU fills the gaps at 50&nbsp;Hz so the robot’s heading stays stable during turns — critical when facing machines.</text>
+  </svg>
+  <p class="caption">Figure 2 — Each box names a <strong>deployable ROS&nbsp;2 package</strong> or message type. The EKF is an industry-standard sensor-fusion technique.</p>
+</div>
+
+<!-- ========== NAVIGATION DETAIL ========== -->
+<h2><span class="num">3</span> Navigation module — planning &amp; avoidance</h2>
+
+<div class="figure-wrap">
+  <div class="figure-title">Figure 3 — Navigation pipeline (global → local → control)</div>
+  <svg width="880" height="340" viewBox="0 0 880 340">
+    <defs><marker id="a3" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 9 3, 0 6" fill="#4a5568"/></marker></defs>
+
+    <rect x="20" y="20" width="200" height="88" rx="10" fill="#e8f4fc" stroke="#2c6fbb" stroke-width="1.5"/>
+    <text x="120" y="44" text-anchor="middle" font-size="10" font-weight="700" fill="#0c1e33">Global planner</text>
+    <text x="120" y="60" text-anchor="middle" font-size="8" fill="#2c5282">astar_planner_ros2.py</text>
+    <text x="120" y="74" text-anchor="middle" font-size="7" fill="#4a5568">OR astar_planner_ros2_Manhattan.py</text>
+    <text x="120" y="88" text-anchor="middle" font-size="6.5" fill="#718096" font-style="italic">Heuristic A* · map inflation · scipy.ndimage</text>
+    <text x="120" y="100" text-anchor="middle" font-size="6" fill="#276749" font-family="JetBrains Mono, monospace">sub /map, goal → pub /astar_path</text>
+
+    <line x1="220" y1="64" x2="248" y2="64" stroke="#333" stroke-width="2" marker-end="url(#a3)"/>
+
+    <rect x="250" y="20" width="210" height="88" rx="10" fill="#fdf5e6" stroke="#c9a227" stroke-width="1.5"/>
+    <text x="355" y="44" text-anchor="middle" font-size="10" font-weight="700" fill="#0c1e33">Local planner &amp; safety field</text>
+    <text x="355" y="60" text-anchor="middle" font-size="8" fill="#9c6b16">dwa_planner_ros2_mid360.py</text>
+    <text x="355" y="74" text-anchor="middle" font-size="7" fill="#4a5568">DWA sampling · trajectory scoring</text>
+    <text x="355" y="88" text-anchor="middle" font-size="6.5" fill="#718096" font-style="italic">Nav2-compatible costmap · scipy EDT inflation</text>
+    <text x="355" y="100" text-anchor="middle" font-size="6" fill="#276749" font-family="JetBrains Mono, monospace">/dwa_cmd_vel · /dwa_obstacles</text>
+
+    <line x1="460" y1="64" x2="488" y2="64" stroke="#333" stroke-width="2" marker-end="url(#a3)"/>
+
+    <rect x="490" y="20" width="200" height="88" rx="10" fill="#e8faf5" stroke="#2d7a5e" stroke-width="1.5"/>
+    <text x="590" y="42" text-anchor="middle" font-size="10" font-weight="700" fill="#0c1e33">Motion controller</text>
+    <text x="590" y="58" text-anchor="middle" font-size="8" fill="#276749">g1_position_control_ros2.py</text>
+    <text x="590" y="72" text-anchor="middle" font-size="7" fill="#4a5568">OR g1_position_control_ros2_manhattan.py</text>
+    <text x="590" y="86" text-anchor="middle" font-size="6.5" fill="#718096" font-style="italic">Manhattan = vx XOR vy (crab-style)</text>
+    <text x="590" y="98" text-anchor="middle" font-size="6" fill="#276749" font-family="JetBrains Mono, monospace">/cmd_vel → SDK or sim</text>
+
+    <rect x="710" y="20" width="150" height="88" rx="10" fill="#f0f4f8" stroke="#718096" stroke-width="1.3"/>
+    <text x="785" y="48" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">Operator / MES</text>
+    <text x="785" y="64" text-anchor="middle" font-size="7" fill="#4a5568">RViz 2D Goal</text>
+    <text x="785" y="78" text-anchor="middle" font-size="7" fill="#4a5568">or Action client</text>
+    <text x="785" y="92" text-anchor="middle" font-size="6.5" fill="#718096" font-family="JetBrains Mono, monospace">/move_base_simple/goal</text>
+
+    <!-- Decision diamond -->
+    <polygon points="355,150 430,190 355,230 280,190" fill="#fff9e6" stroke="#c9a227" stroke-width="1.5"/>
+    <text x="355" y="186" text-anchor="middle" font-size="9" font-weight="700" fill="#744210">Obstacle</text>
+    <text x="355" y="200" text-anchor="middle" font-size="9" font-weight="700" fill="#744210">ahead?</text>
+
+    <text x="200" y="188" text-anchor="middle" font-size="8" fill="#276749" font-weight="600">Follow A*</text>
+    <line x1="120" y1="108" x2="120" y2="190" stroke="#2c6fbb" stroke-dasharray="5,4"/>
+    <line x1="120" y1="190" x2="275" y2="190" stroke="#2c6fbb" stroke-width="1.2" marker-end="url(#a3)"/>
+
+    <text x="520" y="175" font-size="8" fill="#c05621" font-weight="600">DWA overrides</text>
+    <line x1="355" y1="108" x2="355" y2="145" stroke="#c05621" stroke-width="1.2" marker-end="url(#a3)"/>
+
+    <!-- Legend row -->
+    <rect x="20" y="250" width="840" height="78" rx="8" fill="#fff" stroke="#dce2eb"/>
+    <text x="40" y="272" font-size="9" font-weight="700" fill="#0c1e33">Technique glossary (for reviewers)</text>
+    <text x="40" y="290" font-size="7.5" fill="#4a5568"><tspan font-weight="600">A*:</tspan> optimal grid search on occupancy map · <tspan font-weight="600">DWA:</tspan> dynamic window, samples feasible (v,ω) trajectories ·</text>
+    <text x="40" y="304" font-size="7.5" fill="#4a5568"><tspan font-weight="600">Costmap:</tspan> 2D danger field (Nav2 cost semantics 0–254) · <tspan font-weight="600">EDT:</tspan> Euclidean distance transform for inflation (SciPy)</text>
+    <text x="40" y="318" font-size="7.5" fill="#4a5568"><tspan font-weight="600">Manhattan motion:</tspan> one axis at a time — matches forward/back and lateral “crab” steps in structured aisles.</text>
+  </svg>
+  <p class="caption">Figure 3 — <strong>Global</strong> path is computed once per goal; <strong>local</strong> DWA reacts every 100&nbsp;ms to moving obstacles; the <strong>controller</strong> blends path tracking with DWA when needed.</p>
+</div>
+
+<div class="callout">
+  <strong>Why this matters for tenders:</strong> The stack combines <em>open, auditable</em> ROS&nbsp;2 Nav2 components (map server, lifecycle, EKF, tf2) with <em>application-specific</em> Python nodes in <code>navigation_controller</code>,
+  demonstrating both standard industry practice and tailored humanoid behaviour (Manhattan / corridor tuning).
+</div>
+
+<!-- ========== TABLE ========== -->
+<h2><span class="num">4</span> Technology inventory (audit-friendly)</h2>
+<table>
+  <tr>
+    <th>Layer</th>
+    <th>ROS&nbsp;2 package / node</th>
+    <th>Library or technique</th>
+    <th>Primary interfaces</th>
+  </tr>
+  <tr>
+    <td>Build</td>
+    <td><code>navigation_controller</code></td>
+    <td>ament_cmake + ament_cmake_python, colcon</td>
+    <td>Install to <code>lib/&lt;pkg&gt;/</code>, launch, config</td>
+  </tr>
+  <tr>
+    <td>Localization</td>
+    <td><code>mid360_locate</code>, <code>robot_localization</code></td>
+    <td>Point cloud registration (NDT-class), EKF sensor fusion</td>
+    <td><code>/odometry/map</code>, <code>/odometry/ekf</code>, TF</td>
+  </tr>
+  <tr>
+    <td>Mapping</td>
+    <td><code>nav2_map_server</code>, <code>nav2_lifecycle_manager</code></td>
+    <td>Occupancy grid map server (Nav2)</td>
+    <td><code>/map</code>, lifecycle transitions</td>
+  </tr>
+  <tr>
+    <td>Planning</td>
+    <td><code>astar_planner_ros2*.py</code></td>
+    <td>A* search, SciPy map morphology / inflation</td>
+    <td><code>/astar_path</code></td>
+  </tr>
+  <tr>
+    <td>Obstacle avoidance</td>
+    <td><code>dwa_planner_ros2_mid360.py</code></td>
+    <td>DWA, rolling costmap, SciPy <code>distance_transform_edt</code></td>
+    <td><code>/dwa_cmd_vel</code>, <code>/dwa_local_costmap</code></td>
+  </tr>
+  <tr>
+    <td>Control</td>
+    <td><code>g1_position_control_ros2*.py</code></td>
+    <td>PID-style tracking, optional Unitree SDK2</td>
+    <td><code>/cmd_vel</code>, hardware DDS</td>
+  </tr>
+  <tr>
+    <td>Middleware</td>
+    <td>ROS&nbsp;2 Humble</td>
+    <td>rclpy, tf2_ros, sensor_msgs, nav_msgs, geometry_msgs</td>
+    <td>QoS, topics, actions</td>
+  </tr>
+</table>
+
+<h2><span class="num">5</span> Deployment alignment (corridor + machine-facing)</h2>
+<ul>
+  <li><strong>Manhattan stack:</strong> launch with <code class="mono">astar:=manhattan</code> for axis-aligned global paths and single-axis motion (matches crab-style operation).</li>
+  <li><strong>Production localization:</strong> <code class="mono">use_localization:=true</code> for LiDAR + EKF on site.</li>
+  <li><strong>Goals:</strong> define machine access points in the <code>map</code> frame; final orientation faces the equipment.</li>
+</ul>
+
+<footer>
+  <div class="conf"><strong>Proposal document</strong> — G1 localization &amp; navigation architecture<br>
+  Intended for client / tender review · Based on <code>navigation_controller</code> ROS&nbsp;2 Humble workspace</div>
+  <div style="margin-top:8px; opacity:0.75;">Figures are schematic; exact topic names and parameters may be adjusted per deployment configuration.</div>
+</footer>
+
+</body>
+</html>

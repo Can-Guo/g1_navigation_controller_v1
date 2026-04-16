@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>G1 Humanoid Robot — Autonomous Navigation & Localization System</title>
+    <style>
+        :root {
+            --primary: #1a3a5c;
+            --accent: #2980b9;
+            --accent-light: #3498db;
+            --bg: #f8f9fa;
+            --card-bg: #ffffff;
+            --text: #2c3e50;
+            --text-light: #6c7a89;
+            --border: #e0e4e8;
+            --success: #27ae60;
+            --warning: #f39c12;
+            --danger: #e74c3c;
+            --code-bg: #f0f3f6;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            font-size: 15px;
+        }
+
+        /* ============ HEADER ============ */
+        .hero {
+            background: linear-gradient(135deg, var(--primary) 0%, #0d2137 100%);
+            color: #fff;
+            padding: 60px 40px 50px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .hero::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+            pointer-events: none;
+        }
+        .hero h1 {
+            font-size: 2.4em;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            margin-bottom: 8px;
+            position: relative;
+        }
+        .hero .subtitle {
+            font-size: 1.15em;
+            opacity: 0.85;
+            font-weight: 300;
+            position: relative;
+        }
+        .hero .badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.25);
+            border-radius: 20px;
+            padding: 4px 16px;
+            font-size: 0.82em;
+            margin-top: 18px;
+            position: relative;
+        }
+
+        /* ============ LAYOUT ============ */
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 0 30px;
+        }
+
+        /* ============ TOC ============ */
+        .toc {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            margin: 36px auto;
+            padding: 28px 36px;
+            max-width: 720px;
+        }
+        .toc h2 {
+            font-size: 1.1em;
+            color: var(--primary);
+            margin-bottom: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .toc ol {
+            padding-left: 20px;
+        }
+        .toc li {
+            margin: 6px 0;
+        }
+        .toc a {
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .toc a:hover { text-decoration: underline; }
+
+        /* ============ SECTIONS ============ */
+        section {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            margin: 28px 0;
+            padding: 36px 40px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+        }
+        section h2 {
+            font-size: 1.45em;
+            color: var(--primary);
+            border-bottom: 2px solid var(--accent);
+            padding-bottom: 10px;
+            margin-bottom: 22px;
+        }
+        section h3 {
+            font-size: 1.15em;
+            color: var(--primary);
+            margin: 22px 0 10px;
+        }
+        section h4 {
+            font-size: 1.0em;
+            color: var(--accent);
+            margin: 16px 0 8px;
+        }
+        p { margin-bottom: 12px; }
+        ul, ol { margin: 8px 0 14px 22px; }
+        li { margin: 4px 0; }
+
+        /* ============ TABLES ============ */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+            font-size: 0.93em;
+        }
+        th, td {
+            border: 1px solid var(--border);
+            padding: 10px 14px;
+            text-align: left;
+        }
+        th {
+            background: #eef2f7;
+            color: var(--primary);
+            font-weight: 600;
+        }
+        tr:nth-child(even) td { background: #fafbfc; }
+
+        /* ============ DIAGRAM BOXES ============ */
+        .diagram {
+            background: #f4f7fa;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 24px;
+            margin: 18px 0;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 0.88em;
+            line-height: 1.65;
+            overflow-x: auto;
+            white-space: pre;
+            color: var(--text);
+        }
+
+        /* ============ HIGHLIGHT BOXES ============ */
+        .highlight-box {
+            border-left: 4px solid var(--accent);
+            background: #eaf4fc;
+            padding: 16px 20px;
+            border-radius: 0 8px 8px 0;
+            margin: 16px 0;
+        }
+        .highlight-box.green {
+            border-left-color: var(--success);
+            background: #eafaf1;
+        }
+        .highlight-box.orange {
+            border-left-color: var(--warning);
+            background: #fef9e7;
+        }
+        .highlight-box.red {
+            border-left-color: var(--danger);
+            background: #fdedec;
+        }
+        .highlight-box strong { color: var(--primary); }
+
+        /* ============ KPI GRID ============ */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin: 18px 0;
+        }
+        .kpi-card {
+            background: linear-gradient(135deg, #f7f9fc 0%, #eef2f7 100%);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 18px 20px;
+            text-align: center;
+        }
+        .kpi-card .value {
+            font-size: 1.6em;
+            font-weight: 700;
+            color: var(--accent);
+        }
+        .kpi-card .label {
+            font-size: 0.85em;
+            color: var(--text-light);
+            margin-top: 4px;
+        }
+
+        /* ============ FLOW STEPS ============ */
+        .flow-steps {
+            display: flex;
+            gap: 0;
+            align-items: center;
+            margin: 18px 0;
+            flex-wrap: wrap;
+        }
+        .flow-step {
+            background: var(--accent);
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 0.9em;
+            text-align: center;
+            min-width: 120px;
+        }
+        .flow-arrow {
+            font-size: 1.4em;
+            color: var(--accent);
+            padding: 0 8px;
+            font-weight: bold;
+        }
+
+        /* ============ TWO-COL ============ */
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin: 16px 0;
+        }
+        @media (max-width: 768px) {
+            .two-col { grid-template-columns: 1fr; }
+            .flow-steps { flex-direction: column; align-items: stretch; }
+            .flow-arrow { transform: rotate(90deg); text-align: center; }
+        }
+
+        /* ============ CODE ============ */
+        code {
+            background: var(--code-bg);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-family: 'Consolas', 'Courier New', monospace;
+        }
+
+        /* ============ FOOTER ============ */
+        footer {
+            text-align: center;
+            padding: 30px 20px;
+            color: var(--text-light);
+            font-size: 0.85em;
+        }
+
+        /* ============ LAYER DIAGRAM ============ */
+        .layer-stack {
+            margin: 18px 0;
+        }
+        .layer {
+            border: 2px solid var(--accent);
+            border-radius: 8px;
+            padding: 14px 20px;
+            margin: 8px 0;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .layer .layer-label {
+            background: var(--accent);
+            color: #fff;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 0.85em;
+            white-space: nowrap;
+            min-width: 120px;
+            text-align: center;
+        }
+        .layer .layer-content {
+            font-size: 0.93em;
+        }
+        .layer.l-sensor { border-color: #27ae60; }
+        .layer.l-sensor .layer-label { background: #27ae60; }
+        .layer.l-perception { border-color: #2980b9; }
+        .layer.l-perception .layer-label { background: #2980b9; }
+        .layer.l-planning { border-color: #8e44ad; }
+        .layer.l-planning .layer-label { background: #8e44ad; }
+        .layer.l-control { border-color: #d35400; }
+        .layer.l-control .layer-label { background: #d35400; }
+        .layer.l-hardware { border-color: #c0392b; }
+        .layer.l-hardware .layer-label { background: #c0392b; }
+    </style>
+</head>
+<body>
+
+<!-- ================================================================== -->
+<!-- HERO -->
+<!-- ================================================================== -->
+<div class="hero">
+    <h1>G1 Humanoid Robot</h1>
+    <div class="subtitle">Autonomous Localization &amp; Navigation System — Technical Overview</div>
+    <div class="badge">ROS 2 Humble &nbsp;|&nbsp; Livox MID-360 LiDAR &nbsp;|&nbsp; Unitree G1</div>
+</div>
+
+<div class="container">
+
+<!-- ================================================================== -->
+<!-- TABLE OF CONTENTS -->
+<!-- ================================================================== -->
+<nav class="toc">
+    <h2>Table of Contents</h2>
+    <ol>
+        <li><a href="#s1">Executive Summary</a></li>
+        <li><a href="#s2">System Architecture</a></li>
+        <li><a href="#s3">Sensor Suite — Livox MID-360</a></li>
+        <li><a href="#s4">Localization — LiDAR-Inertial Fusion</a></li>
+        <li><a href="#s5">Global Path Planning — A* Algorithm</a></li>
+        <li><a href="#s6">Local Planning &amp; Obstacle Avoidance — DWA</a></li>
+        <li><a href="#s7">Motion Control &amp; Hardware Interface</a></li>
+        <li><a href="#s8">Map Management</a></li>
+        <li><a href="#s9">External Integration — Action Interface</a></li>
+        <li><a href="#s10">Safety &amp; Reliability</a></li>
+        <li><a href="#s11">System Specifications</a></li>
+    </ol>
+</nav>
+
+<!-- ================================================================== -->
+<!-- 1. EXECUTIVE SUMMARY -->
+<!-- ================================================================== -->
+<section id="s1">
+    <h2>1. Executive Summary</h2>
+    <p>
+        This document presents the technical method and principles of the <strong>G1 Humanoid Robot Autonomous Navigation System</strong>.
+        The system enables the Unitree G1 humanoid robot to autonomously navigate in indoor environments by integrating
+        real-time 3D LiDAR perception, sensor fusion-based localization, global/local path planning, and direct hardware locomotion control.
+    </p>
+
+    <div class="kpi-grid">
+        <div class="kpi-card">
+            <div class="value">50 Hz</div>
+            <div class="label">Localization Output Rate (EKF-fused)</div>
+        </div>
+        <div class="kpi-card">
+            <div class="value">0.25 m/s</div>
+            <div class="label">Max Navigation Speed</div>
+        </div>
+        <div class="kpi-card">
+            <div class="value">0.20 m</div>
+            <div class="label">Goal Reaching Tolerance</div>
+        </div>
+        <div class="kpi-card">
+            <div class="value">10 Hz</div>
+            <div class="label">Control Loop Frequency</div>
+        </div>
+    </div>
+
+    <div class="highlight-box green">
+        <strong>Key Principle:</strong> The system follows a layered architecture separating
+        <em>Sensing → Localization → Planning → Control</em>, where each layer operates as an independent ROS 2 node
+        communicating through well-defined topics and actions. This modularity allows independent tuning, testing,
+        and replacement of any layer.
+    </div>
+</section>
+
+<!-- ================================================================== -->
+<!-- 2. SYSTEM ARCHITECTURE -->
+<!-- ================================================================== -->
+<section id="s2">
+    <h2>2. System Architecture</h2>
+    <p>
+        The navigation stack is built on <strong>ROS 2 Humble</strong> and organized into five distinct layers.
+        All nodes are launched through a single unified launch file (<code>fusion_ros2.launch.py</code>) with
+        environment-driven configuration via <code>config_env.yaml</code>.
+    </p>
+
+    <h3>2.1 Layered Architecture</h3>
+    <div class="layer-stack">
+        <div class="layer l-sensor">
+            <span class="layer-label">Sensor Layer</span>
+            <span class="layer-content">
+                <strong>Livox MID-360 Driver</strong> — publishes raw 3D point cloud (<code>/livox/lidar</code>) and IMU data (<code>/livox/imu</code>) at native rates
+            </span>
+        </div>
+        <div class="layer l-perception">
+            <span class="layer-label">Perception Layer</span>
+            <span class="layer-content">
+                <strong>Localization Node</strong> (mid360_locate) — point cloud registration against a prior PCD map using Fast-GICP; outputs pose at 2–4 Hz<br>
+                <strong>EKF Fusion Node</strong> (robot_localization) — fuses LiDAR pose + IMU angular velocity; outputs smooth pose at 50 Hz
+            </span>
+        </div>
+        <div class="layer l-planning">
+            <span class="layer-label">Planning Layer</span>
+            <span class="layer-content">
+                <strong>A* Global Planner</strong> — computes collision-free global path on 2D occupancy grid with obstacle inflation<br>
+                <strong>DWA Local Planner</strong> — dynamic obstacle avoidance using real-time 3D point cloud clustering
+            </span>
+        </div>
+        <div class="layer l-control">
+            <span class="layer-label">Control Layer</span>
+            <span class="layer-content">
+                <strong>Position Controller</strong> — waypoint tracking, speed regulation, DWA integration, timeout recovery
+            </span>
+        </div>
+        <div class="layer l-hardware">
+            <span class="layer-label">Hardware Layer</span>
+            <span class="layer-content">
+                <strong>Unitree SDK Interface</strong> — direct locomotion commands to G1 via DDS over Ethernet
+            </span>
+        </div>
+    </div>
+
+    <h3>2.2 Data Flow &amp; Topic Architecture</h3>
+    <div class="diagram">
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         LIVOX MID-360 SENSOR                                │
+│                  /livox/lidar (PointCloud2)    /livox/imu (Imu)             │
+└─────────┬──────────────────────────────────────┬────────────────────────────┘
+          │                                      │
+          ▼                                      │
+┌─────────────────────────┐                      │
+│    mid360_locate        │                      │
+│  (FastGICP Registration)│                      │
+│                         │                      │
+│  Output:                │                      │
+│  /odometry/map (2-4 Hz) │                      │
+│  /aligned (PointCloud2) │                      │
+│  /localization_ready    │                      │
+│  /localization_confidence│                     │
+└─────────┬───────────────┘                      │
+          │                                      │
+          ▼                                      ▼
+     ┌────────────────────────────────────────────────┐
+     │          EKF Fusion (robot_localization)        │
+     │  Inputs: /odometry/map + /livox/imu             │
+     │  Output: /odometry/filtered (50 Hz)             │
+     │  TF: map → odom → base_link                     │
+     └─────────────┬──────────────────────────────────┘
+                   │
+     ┌─────────────┼──────────────────────┐
+     ▼             ▼                      ▼
+┌──────────┐ ┌───────────────┐ ┌───────────────────┐
+│ A* Global│ │ DWA Local     │ │ Position Control  │
+│ Planner  │ │ Planner       │ │ (g1_position_ctrl)│
+│          │ │               │ │                   │
+│ /map ──▶ │ │ /aligned ──▶  │ │ /astar_path ──▶   │
+│ /astar_  │ │ /dwa_cmd_vel  │ │ /dwa_cmd_vel ──▶  │
+│  path    │ │ /obstacle_    │ │ /cmd_vel          │
+│          │ │  status       │ │                   │
+└──────────┘ └───────────────┘ └───────┬───────────┘
+                                       │
+                                       ▼
+                              ┌──────────────────┐
+                              │  Unitree G1 SDK  │
+                              │  (DDS Ethernet)  │
+                              └──────────────────┘</div>
+
+    <h3>2.3 TF (Transform) Tree</h3>
+    <p>
+        The coordinate frame chain is critical for correctly transforming sensor data, 
+        planning results, and control commands into a unified spatial reference.
+    </p>
+    <div class="diagram">
+map  ──(EKF publish)──▶  odom  ──(EKF publish)──▶  base_link
+                                                       │
+                                            (static TF: pelvis offset)
+                                                       │
+                                                       ▼
+                                                    pelvis
+                                                       │
+                                            (static TF: LiDAR mount)
+                                                       │
+                                                       ▼
+                                                  lidar_frame
+                                                       │
+                                            (static TF: Livox convention)
+                                                       │
+                                                       ▼
+                                                  livox_frame</div>
+</section>
+
+<!-- ================================================================== -->
+<!-- 3. SENSOR SUITE -->
+<!-- ================================================================== -->
+<section id="s3">
+    <h2>3. Sensor Suite — Livox MID-360</h2>
+    <p>
+        The primary sensor is the <strong>Livox MID-360</strong>, a non-repetitive scanning LiDAR
+        that provides both 3D point cloud data and built-in IMU measurements. This single sensor
+        serves as the foundation for both localization and obstacle detection.
+    </p>
+
+    <div class="two-col">
+        <div>
+            <h4>LiDAR Specifications</h4>
+            <table>
+                <tr><th>Parameter</th><th>Value</th></tr>
+                <tr><td>Scanning Pattern</td><td>Non-repetitive, 360° coverage</td></tr>
+                <tr><td>Detection Range</td><td>Up to 40 m</td></tr>
+                <tr><td>Point Rate</td><td>200,000 pts/s</td></tr>
+                <tr><td>FOV</td><td>360° × 59°</td></tr>
+                <tr><td>ROS 2 Driver</td><td><code>livox_ros_driver2</code></td></tr>
+                <tr><td>Output Topic</td><td><code>/livox/lidar</code> (PointCloud2)</td></tr>
+            </table>
+        </div>
+        <div>
+            <h4>Built-in IMU</h4>
+            <table>
+                <tr><th>Parameter</th><th>Value</th></tr>
+                <tr><td>Type</td><td>6-axis (3-axis gyro + 3-axis accel)</td></tr>
+                <tr><td>Output Rate</td><td>~200 Hz</td></tr>
+                <tr><td>ROS 2 Topic</td><td><code>/livox/imu</code></td></tr>
+                <tr><td>Used For</td><td>EKF angular velocity fusion</td></tr>
+                <tr><td>Used For</td><td>Point cloud motion deskew</td></tr>
+            </table>
+        </div>
+    </div>
+
+    <div class="highlight-box">
+        <strong>Design Choice:</strong> Using a single sensor for both localization (point cloud) and inertial measurement (IMU)
+        eliminates the need for extrinsic calibration between separate LiDAR and IMU devices, simplifying deployment and
+        reducing potential error sources.
+    </div>
+</section>
+
+<!-- ================================================================== -->
+<!-- 4. LOCALIZATION -->
+<!-- ================================================================== -->
+<section id="s4">
+    <h2>4. Localization — LiDAR-Inertial Fusion</h2>
+    <p>
+        Localization is the most critical component of the navigation system. It answers the fundamental question:
+        <em>"Where is the robot on the map right now?"</em>  
+        The system uses a two-stage architecture combining high-accuracy but low-frequency LiDAR scan matching
+        with high-frequency IMU-based prediction.
+    </p>
+
+    <h3>4.1 Stage 1: LiDAR Scan Matching (mid360_locate)</h3>
+    <p>
+        The <code>mid360_locate</code> node performs real-time point cloud registration between the incoming LiDAR scan
+        and a pre-built 3D point cloud map (<code>.pcd</code> file). This provides the absolute position and orientation
+        of the robot in the map frame.
+    </p>
+
+    <h4>Algorithm: Fast Generalized ICP (Fast-GICP)</h4>
+    <p>
+        <strong>Generalized Iterative Closest Point (GICP)</strong> is a point cloud alignment algorithm that extends
+        classic ICP by modeling both the source and target point sets as probability distributions rather than rigid
+        point correspondences. This produces more robust and accurate alignment, especially with sparse or noisy data
+        typical of LiDAR scans.
+    </p>
+    <p>
+        The <strong>Fast-GICP</strong> implementation used in this system adds multi-threaded parallel computation
+        using OpenMP, achieving real-time performance (2–4 Hz registration rate) on embedded platforms. VGICP (Voxelized GICP)
+        and NDT (Normal Distributions Transform) backends are also available as alternative registration strategies.
+    </p>
+
+    <table>
+        <tr><th>Feature</th><th>Description</th></tr>
+        <tr><td>Registration Algorithm</td><td>Fast-GICP with OpenMP acceleration (multi-threaded)</td></tr>
+        <tr><td>Input</td><td>Current LiDAR scan + pre-built PCD map</td></tr>
+        <tr><td>Output Rate</td><td>2–4 Hz (depends on scan density &amp; environment complexity)</td></tr>
+        <tr><td>Output Topics</td><td><code>/odometry/map</code>, <code>/aligned</code>, <code>/localization_confidence</code></td></tr>
+        <tr><td>IMU Motion Deskew</td><td>Compensates for robot motion during scan acquisition using IMU gyroscope integration</td></tr>
+        <tr><td>Confidence Scoring</td><td>Registration quality metric published for downstream decision-making</td></tr>
+        <tr><td>Auto-Initialization</td><td>Automatic initial pose estimation without manual intervention</td></tr>
+        <tr><td>Jump Rejection</td><td>Rejects sudden position jumps (&gt;4m) or rotation jumps (&gt;2 rad) to prevent false localization</td></tr>
+    </table>
+
+    <div class="highlight-box">
+        <strong>Point Cloud Deskew (Motion Compensation):</strong>
+        During a LiDAR scan acquisition (~100 ms), the robot may move, causing the point cloud to be "smeared."
+        The system integrates IMU gyroscope measurements over the scan duration to compute a per-point rotation correction,
+        effectively undoing the motion distortion before registration. This is essential for maintaining accurate
+        alignment when the robot is walking.
+    </div>
+
+    <h3>4.2 Stage 2: Extended Kalman Filter (EKF) Sensor Fusion</h3>
+    <p>
+        The LiDAR-based localization provides accurate absolute position at 2–4 Hz, but the G1 humanoid robot's
+        walking motion requires continuous pose estimates for stable control. The <strong>Extended Kalman Filter (EKF)</strong>
+        bridges this gap by fusing multiple sensor sources into a smooth, high-frequency pose estimate.
+    </p>
+
+    <h4>Fusion Strategy</h4>
+    <div class="two-col">
+        <div>
+            <h4>Input Source 1: LiDAR Localization</h4>
+            <ul>
+                <li><strong>Topic:</strong> <code>/odometry/map</code></li>
+                <li><strong>Rate:</strong> 2–4 Hz</li>
+                <li><strong>Fused states:</strong> x, y, yaw (absolute position &amp; heading)</li>
+                <li><strong>Role:</strong> Provides the <em>absolute reference</em> — corrects drift</li>
+            </ul>
+        </div>
+        <div>
+            <h4>Input Source 2: IMU (MID-360 built-in)</h4>
+            <ul>
+                <li><strong>Topic:</strong> <code>/livox/imu</code></li>
+                <li><strong>Rate:</strong> ~200 Hz</li>
+                <li><strong>Fused states:</strong> angular velocities (vroll, vpitch, vyaw) + linear acceleration (ax, ay)</li>
+                <li><strong>Role:</strong> Provides <em>high-frequency prediction</em> between LiDAR updates</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="highlight-box orange">
+        <strong>Critical Design Decision — IMU Orientation NOT Fused:</strong>
+        The IMU's absolute orientation (roll, pitch, yaw from the orientation field) is deliberately <em>excluded</em>
+        from the EKF fusion. Without an external magnetometer or visual reference, the IMU's integrated heading drifts
+        over time and would conflict with the LiDAR-derived heading. Instead, only the <em>angular velocity</em>
+        (gyroscope raw output) is fused — this provides excellent short-term rotation prediction without cumulative drift.
+        The absolute heading reference comes exclusively from the LiDAR scan matching.
+    </div>
+
+    <h4>EKF Output Characteristics</h4>
+    <table>
+        <tr><th>Parameter</th><th>Value</th></tr>
+        <tr><td>Output Topic</td><td><code>/odometry/filtered</code></td></tr>
+        <tr><td>Output Rate</td><td>50 Hz</td></tr>
+        <tr><td>Prediction Mode</td><td><code>predict_to_current_time: true</code> — ensures minimal latency</td></tr>
+        <tr><td>Operation Mode</td><td>2D mode (x, y, yaw only)</td></tr>
+        <tr><td>TF Publishing</td><td>Publishes <code>map → odom</code> and <code>odom → base_link</code> transforms</td></tr>
+        <tr><td>Smoothing</td><td>History-based lagged data smoothing (5.0 s window)</td></tr>
+    </table>
+
+    <h3>4.3 Localization Principle Diagram</h3>
+    <div class="diagram">
+ ┌──────────────────┐       ┌──────────────────────────────────────────────┐
+ │  Pre-built       │       │                mid360_locate                 │
+ │  PCD Map         │       │                                              │
+ │  (3D Point Cloud)├──────▶│  1. Receive raw LiDAR scan                   │
+ │                  │       │  2. IMU gyro deskew (motion compensation)     │
+ └──────────────────┘       │  3. Downsample scan to ~2500 points          │
+                            │  4. Fast-GICP alignment to PCD map           │
+ ┌──────────────────┐       │  5. Compute registration quality / confidence│
+ │  Livox MID-360   │       │  6. Reject abnormal jumps                    │
+ │  /livox/lidar   ├───────▶│  7. Publish /odometry/map (2-4 Hz)           │
+ │  /livox/imu     ├───┐   └──────────┬───────────────────────────────────┘
+ └──────────────────┘   │              │
+                        │              │  /odometry/map (x, y, yaw)
+                        │              │
+                        │   ┌──────────▼──────────────────────────────────┐
+                        │   │         EKF Sensor Fusion                   │
+                        └──▶│  LiDAR pose (2-4 Hz) + IMU gyro (200 Hz)    │
+                            │                                              │
+                            │  Output: /odometry/filtered (50 Hz)          │
+                            │  TF: map → odom → base_link                  │
+                            └─────────────────────────────────────────────┘</div>
+</section>
+
+<!-- ================================================================== -->
+<!-- 5. GLOBAL PLANNING -->
+<!-- ================================================================== -->
+<section id="s5">
+    <h2>5. Global Path Planning — A* Algorithm</h2>
+    <p>
+        The global planner computes a collision-free path from the robot's current position to the target destination
+        on a 2D occupancy grid map. It uses the <strong>A* (A-star)</strong> search algorithm — one of the most
+        well-established and efficient graph search algorithms for finding optimal paths.
+    </p>
+
+    <h3>5.1 A* Algorithm Principle</h3>
+    <p>
+        A* evaluates nodes by combining two cost functions:
+    </p>
+    <ul>
+        <li><strong>g(n)</strong> — the exact cost from the start node to the current node <em>n</em></li>
+        <li><strong>h(n)</strong> — a heuristic estimate of the cost from <em>n</em> to the goal</li>
+        <li><strong>f(n) = g(n) + h(n)</strong> — the total estimated cost through node <em>n</em></li>
+    </ul>
+    <p>
+        The algorithm always expands the node with the lowest f(n) value, guaranteeing the shortest path
+        when the heuristic is admissible (never overestimates the true cost).
+    </p>
+
+    <h3>5.2 G1-Specific Enhancements</h3>
+
+    <h4>Obstacle Inflation</h4>
+    <p>
+        Before planning, the raw occupancy grid is inflated to account for the physical dimensions of the G1 robot.
+        The inflation radius is computed from:
+    </p>
+    <ul>
+        <li><strong>Robot radius:</strong> 0.35 m (G1 body width + safety margin)</li>
+        <li><strong>Inflation radius:</strong> 0.25 m (additional buffer around obstacles)</li>
+    </ul>
+    <p>
+        The inflation uses <strong>Euclidean Distance Transform</strong> (<code>scipy.ndimage.distance_transform_edt</code>)
+        to compute the exact distance from every free cell to the nearest obstacle, then marks all cells within the
+        inflation radius as impassable.
+    </p>
+
+    <h4>Humanoid-Aware Heuristic Function</h4>
+    <p>
+        Unlike wheeled robots that can turn in place easily, the G1 humanoid has non-holonomic constraints —
+        turning requires time and additional walking distance. The heuristic function incorporates this by adding
+        a <strong>Dubins-path-inspired turning cost</strong>:
+    </p>
+    <ul>
+        <li>Base heuristic: Euclidean distance to goal</li>
+        <li>Turning penalty: <code>|heading_difference| × minimum_turn_radius</code> (turn radius ≈ 0.6 m)</li>
+        <li>Large-angle penalty: additional cost for turns exceeding 135° (near U-turn scenarios)</li>
+    </ul>
+
+    <h4>Path Smoothing</h4>
+    <p>
+        The raw A* grid path contains many sharp right-angle turns. A post-processing step applies
+        <strong>path smoothing optimized for the G1 gait</strong>, producing gradual curves that the humanoid
+        robot can follow without stopping to turn.
+    </p>
+
+    <h3>5.3 Planning Pipeline</h3>
+    <div class="flow-steps">
+        <div class="flow-step">Receive Goal<br><small>/move_base_simple/goal</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Inflate Map<br><small>Distance Transform</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">A* Search<br><small>f = g + h</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Smooth Path<br><small>G1-aware curves</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Publish<br><small>/astar_path</small></div>
+    </div>
+</section>
+
+<!-- ================================================================== -->
+<!-- 6. LOCAL PLANNING — DWA -->
+<!-- ================================================================== -->
+<section id="s6">
+    <h2>6. Local Planning &amp; Obstacle Avoidance — DWA</h2>
+    <p>
+        While the A* planner provides a global path on the static map, the real world contains
+        <strong>dynamic obstacles</strong> (people, furniture, doors) that are not in the pre-built map.
+        The <strong>Dynamic Window Approach (DWA)</strong> handles real-time obstacle avoidance by evaluating
+        candidate velocity commands over a short time horizon.
+    </p>
+
+    <h3>6.1 DWA Algorithm Principle</h3>
+    <p>
+        DWA operates in the robot's <em>velocity space</em> (linear velocity v, angular velocity ω).
+        At each control cycle (10 Hz), it:
+    </p>
+    <ol>
+        <li><strong>Generates candidate velocities</strong> within the dynamic window — the set of (v, ω) pairs 
+            reachable given the robot's acceleration limits</li>
+        <li><strong>Simulates forward</strong> each candidate for a time horizon (1.0 s), predicting the resulting trajectory</li>
+        <li><strong>Scores each trajectory</strong> using a multi-objective cost function</li>
+        <li><strong>Selects the highest-scoring</strong> velocity command and publishes it</li>
+    </ol>
+
+    <h3>6.2 Obstacle Detection Pipeline</h3>
+    <p>
+        Obstacle detection operates directly on the registered point cloud (<code>/aligned</code> topic)
+        from the localization node, ensuring obstacles are detected in the correct map frame.
+    </p>
+
+    <div class="flow-steps">
+        <div class="flow-step">Point Cloud<br><small>/aligned</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">TF Transform<br><small>to odom frame</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Spatial Filter<br><small>range, angle, height</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">DBSCAN Clustering<br><small>identify obstacles</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Obstacle List<br><small>centroids + sizes</small></div>
+    </div>
+
+    <h4>Point Filtering Criteria</h4>
+    <table>
+        <tr><th>Filter</th><th>Threshold</th><th>Purpose</th></tr>
+        <tr><td>Distance</td><td>&lt; 1.2 m from robot</td><td>Only nearby obstacles are relevant for local avoidance</td></tr>
+        <tr><td>Angle</td><td>±90° from heading</td><td>Focus on the forward hemisphere</td></tr>
+        <tr><td>Height</td><td>-0.3 m to 0.6 m</td><td>Ignore ground plane and ceiling; detect torso-level obstacles</td></tr>
+    </table>
+
+    <h4>DBSCAN-style Clustering</h4>
+    <p>
+        Filtered points are grouped into clusters using a density-based spatial clustering algorithm.
+        Each cluster with ≥40 points is treated as a distinct obstacle, characterized by its centroid coordinates
+        and point count. The clustering distance threshold is 0.3 m.
+    </p>
+
+    <h3>6.3 Trajectory Scoring Function</h3>
+    <p>
+        Each candidate trajectory is evaluated by a weighted combination of five objectives:
+    </p>
+
+    <table>
+        <tr><th>Objective</th><th>Formula</th><th>Weight</th><th>Purpose</th></tr>
+        <tr>
+            <td>Goal Distance</td>
+            <td><code>-distance_to_goal × 15</code></td>
+            <td>15</td>
+            <td>Attract robot toward destination</td>
+        </tr>
+        <tr>
+            <td>Heading Alignment</td>
+            <td><code>-|angle_to_goal - heading| × 10</code></td>
+            <td>10</td>
+            <td>Prefer trajectories facing the goal</td>
+        </tr>
+        <tr>
+            <td>Collision Risk</td>
+            <td>Exponential penalty: <code>-100 × e^(-d/0.2)</code> for d &lt; 0.4 m<br>
+                Inverse penalty: <code>-30/(d+0.1)</code> for d &lt; 1.0 m</td>
+            <td>×2.0</td>
+            <td>Strong avoidance of nearby obstacles with smooth gradient</td>
+        </tr>
+        <tr>
+            <td>Smoothness</td>
+            <td><code>-3.0 × |Δv| - 5.0 × |Δω|</code></td>
+            <td>3.0 / 5.0</td>
+            <td>Penalize abrupt velocity changes (comfort &amp; stability)</td>
+        </tr>
+        <tr>
+            <td>Speed Reward</td>
+            <td><code>v × 3.0</code></td>
+            <td>3.0</td>
+            <td>Encourage faster forward motion along clear paths</td>
+        </tr>
+    </table>
+
+    <div class="highlight-box">
+        <strong>Continuous Collision Penalty:</strong> Unlike simple binary collision checks, the system uses a
+        <em>continuous penalty function</em> that smoothly increases as the robot approaches an obstacle.
+        This prevents score discontinuities that could cause oscillating behavior, and provides stronger
+        avoidance force as the robot gets closer to danger.
+    </div>
+
+    <h3>6.4 Stuck Detection &amp; Escape Behavior</h3>
+    <p>
+        The DWA planner includes an intelligent <strong>stuck detection and escape mechanism</strong>
+        specifically designed for the G1 humanoid's limitations:
+    </p>
+    <ol>
+        <li><strong>Detection:</strong> If total displacement &lt; 0.15 m over 5 seconds while linear commands are active</li>
+        <li><strong>Obstacle Analysis:</strong> 360° space divided into 8 sectors; obstacle density calculated per sector</li>
+        <li><strong>Escape Sequence:</strong>
+            <ul>
+                <li>Phase 0 (2s): Reverse if front sector is blocked</li>
+                <li>Phase 1 (3s): Rotate toward the clearest sector</li>
+                <li>Phase 2 (2s): Advance in the escape direction</li>
+            </ul>
+        </li>
+    </ol>
+</section>
+
+<!-- ================================================================== -->
+<!-- 7. MOTION CONTROL -->
+<!-- ================================================================== -->
+<section id="s7">
+    <h2>7. Motion Control &amp; Hardware Interface</h2>
+    <p>
+        The Position Controller node bridges the gap between high-level path following and low-level robot locomotion.
+        It receives the global path from A* and real-time avoidance commands from DWA, producing
+        final velocity commands for the G1 robot.
+    </p>
+
+    <h3>7.1 Control Pipeline</h3>
+    <div class="flow-steps">
+        <div class="flow-step">A* Path<br><small>/astar_path</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Waypoint Tracker<br><small>0.5m spacing</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">DWA Override<br><small>if obstacle detected</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">Speed Regulator<br><small>smooth accel/decel</small></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">/cmd_vel<br><small>Unitree SDK</small></div>
+    </div>
+
+    <h3>7.2 Operating Modes</h3>
+    <div class="two-col">
+        <div>
+            <h4>Simulation Mode</h4>
+            <ul>
+                <li><code>use_hardware: false</code></li>
+                <li>Publishes <code>/cmd_vel</code> only</li>
+                <li>Simulated odometry for testing</li>
+                <li>No SDK dependency required</li>
+            </ul>
+        </div>
+        <div>
+            <h4>Hardware Mode</h4>
+            <ul>
+                <li><code>use_hardware: true</code></li>
+                <li>Publishes <code>/cmd_vel</code> AND sends commands via Unitree SDK</li>
+                <li>DDS communication over Ethernet</li>
+                <li>Direct G1 locomotion control</li>
+            </ul>
+        </div>
+    </div>
+
+    <h3>7.3 Speed Constraints</h3>
+    <table>
+        <tr><th>Parameter</th><th>Value</th><th>Rationale</th></tr>
+        <tr><td>Max linear speed</td><td>0.25 m/s</td><td>Safe indoor walking speed for humanoid</td></tr>
+        <tr><td>Max angular speed</td><td>0.08 rad/s (≈4.6°/s)</td><td>Slow rotation preserves localization stability</td></tr>
+        <tr><td>Goal tolerance</td><td>0.20 m</td><td>Accounts for humanoid stepping imprecision</td></tr>
+        <tr><td>DWA timeout</td><td>0.5 s</td><td>Falls back to path following if DWA stops publishing</td></tr>
+    </table>
+
+    <div class="highlight-box orange">
+        <strong>Why Low Angular Speed?</strong> The G1 humanoid's localization relies on LiDAR scan matching.
+        Rapid rotation causes severe point cloud smearing that even IMU deskew cannot fully compensate,
+        leading to localization failures. The angular speed is therefore strictly limited to 0.08 rad/s
+        to maintain reliable localization throughout navigation.
+    </div>
+</section>
+
+<!-- ================================================================== -->
+<!-- 8. MAP MANAGEMENT -->
+<!-- ================================================================== -->
+<section id="s8">
+    <h2>8. Map Management</h2>
+    <p>
+        The system uses <strong>two complementary map representations</strong> for different purposes:
+    </p>
+
+    <div class="two-col">
+        <div>
+            <h4>3D Point Cloud Map (.pcd)</h4>
+            <ul>
+                <li><strong>Used by:</strong> Localization (mid360_locate)</li>
+                <li><strong>Format:</strong> PCD (Point Cloud Data)</li>
+                <li><strong>Content:</strong> Full 3D structural representation</li>
+                <li><strong>Purpose:</strong> Reference for scan-to-map registration</li>
+                <li><strong>Creation:</strong> Built offline via SLAM or manual scanning</li>
+            </ul>
+        </div>
+        <div>
+            <h4>2D Occupancy Grid (.pgm + .yaml)</h4>
+            <ul>
+                <li><strong>Used by:</strong> A* Global Planner</li>
+                <li><strong>Format:</strong> PGM image + YAML metadata</li>
+                <li><strong>Content:</strong> 2D bird's-eye view with free/occupied/unknown cells</li>
+                <li><strong>Purpose:</strong> Fast 2D path planning</li>
+                <li><strong>Creation:</strong> Converted from PCD using <code>pcd2pgm.py</code> tool</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="highlight-box green">
+        <strong>Map Consistency:</strong> Both maps are derived from the same environment scan, ensuring spatial
+        consistency between the localization reference and the planning grid. The <code>pcd2pgm.py</code>
+        utility automates the conversion process, projecting the 3D point cloud onto a 2D plane with
+        configurable height thresholds and resolution.
+    </div>
+</section>
+
+<!-- ================================================================== -->
+<!-- 9. EXTERNAL INTEGRATION -->
+<!-- ================================================================== -->
+<section id="s9">
+    <h2>9. External Integration — Action Interface</h2>
+    <p>
+        For integration with external systems (fleet management, task schedulers, mobile apps),
+        the navigation system exposes a <strong>ROS 2 Action</strong> interface for point-to-point navigation.
+    </p>
+
+    <h4>PointToPoint Action Definition</h4>
+    <table>
+        <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+        <tr><td colspan="3" style="background:#eef2f7; font-weight:600;">Goal</td></tr>
+        <tr><td>target_pose</td><td>geometry_msgs/PoseStamped</td><td>Target position and orientation</td></tr>
+        <tr><td colspan="3" style="background:#eef2f7; font-weight:600;">Feedback</td></tr>
+        <tr><td>current_pose</td><td>geometry_msgs/PoseStamped</td><td>Robot's current position during navigation</td></tr>
+        <tr><td>distance_remaining</td><td>float32</td><td>Remaining distance to goal</td></tr>
+        <tr><td colspan="3" style="background:#eef2f7; font-weight:600;">Result</td></tr>
+        <tr><td>success</td><td>bool</td><td>Whether the goal was reached</td></tr>
+    </table>
+
+    <p>
+        The Action Server manages the full lifecycle of a navigation task: accepting goals, publishing continuous
+        feedback, handling cancellation, and reporting completion. This enables external systems to command
+        the robot to specific waypoints (e.g., "home", "pick", "place") defined in a YAML configuration.
+    </p>
+</section>
+
+<!-- ================================================================== -->
+<!-- 10. SAFETY -->
+<!-- ================================================================== -->
+<section id="s10">
+    <h2>10. Safety &amp; Reliability</h2>
+
+    <h3>10.1 Localization Health Monitoring</h3>
+    <ul>
+        <li><strong>Confidence Score:</strong> Published on <code>/localization_confidence</code> after each registration.
+            Downstream nodes can gate navigation based on confidence thresholds.</li>
+        <li><strong>Ready Signal:</strong> <code>/localization_ready</code> only becomes <code>true</code> after
+            3 consecutive confident registrations — prevents premature movement.</li>
+        <li><strong>Jump Rejection:</strong> Position jumps &gt;4 m or rotation jumps &gt;2 rad between consecutive frames
+            are automatically rejected as outliers.</li>
+    </ul>
+
+    <h3>10.2 Navigation Safeguards</h3>
+    <ul>
+        <li><strong>Action Server Gating:</strong> When <code>allow_rviz_goal_without_action: false</code>,
+            the robot only moves when an active Action is in progress — prevents accidental RViz-triggered motion.</li>
+        <li><strong>Timeout Detection:</strong> The position controller detects when expected progress is not being made
+            and can trigger replanning or safe stop.</li>
+        <li><strong>DWA Command Timeout:</strong> If the DWA planner fails to publish for &gt;0.5 s, the controller
+            falls back to pure path following or stops.</li>
+        <li><strong>Graceful Degradation:</strong> The system supports simulation mode for testing without hardware,
+            and gracefully handles missing packages (e.g., Livox driver not built).</li>
+    </ul>
+
+    <h3>10.3 Conservative Velocity Policy</h3>
+    <div class="highlight-box red">
+        <strong>Safety-First Speed Limits:</strong> The G1 humanoid navigates at a conservative 0.25 m/s
+        (vs. its maximum capability) with angular velocity capped at 0.08 rad/s. These limits are specifically
+        tuned to maintain localization stability — faster speeds would cause LiDAR scan degradation and potential
+        localization loss, which could result in the robot walking into obstacles.
+    </div>
+</section>
+
+<!-- ================================================================== -->
+<!-- 11. SYSTEM SPECIFICATIONS -->
+<!-- ================================================================== -->
+<section id="s11">
+    <h2>11. System Specifications Summary</h2>
+
+    <table>
+        <tr><th>Component</th><th>Technology / Method</th><th>Key Parameter</th></tr>
+        <tr><td>Robot Platform</td><td>Unitree G1 Humanoid</td><td>Bipedal walking robot</td></tr>
+        <tr><td>Middleware</td><td>ROS 2 Humble</td><td>DDS-based real-time communication</td></tr>
+        <tr><td>Primary Sensor</td><td>Livox MID-360</td><td>3D LiDAR + 6-axis IMU</td></tr>
+        <tr><td>Localization</td><td>Fast-GICP scan matching + EKF</td><td>50 Hz output, cm-level accuracy</td></tr>
+        <tr><td>Global Planning</td><td>A* with obstacle inflation</td><td>Humanoid-aware heuristic</td></tr>
+        <tr><td>Local Planning</td><td>Dynamic Window Approach (DWA)</td><td>10 Hz, 1.2 m detection range</td></tr>
+        <tr><td>Obstacle Detection</td><td>3D point cloud DBSCAN clustering</td><td>40-point minimum cluster</td></tr>
+        <tr><td>Sensor Fusion</td><td>Extended Kalman Filter</td><td>LiDAR pose + IMU angular velocity</td></tr>
+        <tr><td>Motion Deskew</td><td>IMU gyroscope integration</td><td>Per-point rotation compensation</td></tr>
+        <tr><td>Map Types</td><td>PCD (3D) + PGM/YAML (2D)</td><td>Dual-map architecture</td></tr>
+        <tr><td>External Interface</td><td>ROS 2 Action (PointToPoint)</td><td>Goal / Feedback / Result</td></tr>
+        <tr><td>Hardware Control</td><td>Unitree SDK2 via DDS</td><td>Ethernet interface</td></tr>
+        <tr><td>Max Linear Speed</td><td>0.25 m/s</td><td>Safety-limited for localization</td></tr>
+        <tr><td>Max Angular Speed</td><td>0.08 rad/s (≈4.6°/s)</td><td>Prevents scan smearing</td></tr>
+        <tr><td>Goal Tolerance</td><td>0.20 m</td><td>Accounts for bipedal stepping</td></tr>
+    </table>
+</section>
+
+</div><!-- /container -->
+
+<footer>
+    <p>G1 Humanoid Robot — Autonomous Navigation System Technical Overview</p>
+    <p>Document generated: March 2026 &nbsp;|&nbsp; Confidential — For Client Review Only</p>
+</footer>
+
+</body>
+</html>

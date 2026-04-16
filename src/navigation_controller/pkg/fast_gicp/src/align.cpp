@@ -23,7 +23,7 @@ template <typename Registration>
 void test_pcl(Registration& reg, const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& target, const pcl::PointCloud<pcl::PointXYZ>::ConstPtr& source) {
   pcl::PointCloud<pcl::PointXYZ>::Ptr aligned(new pcl::PointCloud<pcl::PointXYZ>);
 
-  double fitness_score = 0.0;
+  double fitness_score = 0.001;
 
   // single run
   auto t1 = std::chrono::high_resolution_clock::now();

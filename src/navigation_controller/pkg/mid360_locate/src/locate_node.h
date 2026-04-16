@@ -123,6 +123,9 @@ extern std::string g_imu_topic;              // IMU topic name (default: /livox/
 extern double g_imu_buffer_sec;              // How long IMU history to keep (seconds)
 extern int64_t g_imu_time_offset_ns;         // Optional time offset IMU->LiDAR (ns), default 0
 extern int g_deskew_reference_mode;          // 0=start, 1=mid, 2=end (reference time inside scan)
+extern int g_scan_sample_target_max;         // Max points kept after normal-space sampling per scan
+extern int g_min_scan_points_for_registration;  // Skip scan if too sparse (avoid unstable registration)
+extern int g_scan_status_log_interval_ms;    // Throttle interval for scan status logs
 
 // ============================================================================
 // ✅ Registration acceptance thresholds (ROS2 parameters)

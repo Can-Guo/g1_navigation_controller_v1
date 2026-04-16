@@ -149,18 +149,18 @@ ekf_localization_node:
 # ============================================================================
 #
 # 1. 备份原配置：
-#    cp src/g1_nav/config/ekf_localization.yaml \
-#       src/g1_nav/config/ekf_localization.yaml.bak
+#    cp src/navigation_controller/config/ekf_localization.yaml \
+#       src/navigation_controller/config/ekf_localization.yaml.bak
 #
 # 2. 应用此配置：
-#    cp src/g1_nav/config/ekf_localization_improved.yaml \
-#       src/g1_nav/config/ekf_localization.yaml
+#    cp src/navigation_controller/config/ekf_localization_improved.yaml \
+#       src/navigation_controller/config/ekf_localization.yaml
 #
 # 3. 重新编译：
-#    colcon build --packages-select g1_nav
+#    colcon build --packages-select navigation_controller
 #
 # 4. 重启launch：
-#    ros2 launch g1_nav fusion_ros2.launch.py
+#    ros2 launch navigation_controller fusion_ros2.launch.py
 #
 # 5. 监控效果：
 #    # 终端1：查看EKF诊断

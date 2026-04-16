@@ -1,4 +1,6 @@
 #include "locate_node.h"
+#include <cstdlib>
+#include <limits>
 
 // 全局变量定义
 bool inited = false;
@@ -25,6 +27,9 @@ std::string g_imu_topic = "/livox/imu";
 double g_imu_buffer_sec = 5.0;
 int64_t g_imu_time_offset_ns = 0;
 int g_deskew_reference_mode = 0;  // 0=start, 1=mid, 2=end
+int g_scan_sample_target_max = 2500;
+int g_min_scan_points_for_registration = 800;
+int g_scan_status_log_interval_ms = 3000;
 
 // 默认置信度阈值上调到 0.30：
 // 现场经验表明 0.20~0.25 容易放过低质量匹配，导致“看起来有定位但很不稳”。
@@ -81,10 +86,44 @@ bool buildGyroTrajectoryForScan(
       return false;
     }
     // Copy relevant IMU samples to avoid holding the mutex while integrating.
+    // Keep a wider margin (150ms) to tolerate callback jitter and DDS burst behavior.
     for (const auto& s : g_imu_buffer) {
       const int64_t ns = s.stamp.nanoseconds();
-      if (ns >= scan_start.nanoseconds() - 50'000'000LL && ns <= scan_end.nanoseconds() + 50'000'000LL) {
+      if (ns >= scan_start.nanoseconds() - 150'000'000LL && ns <= scan_end.nanoseconds() + 150'000'000LL) {
         imu.push_back(s);
+      }
+    }
+
+    // If strict window extraction fails, fall back to nearest boundary samples
+    // from the whole IMU buffer. This avoids frequent deskew OFF toggling when
+    // IMU callback timing is slightly delayed.
+    if (imu.size() < 2) {
+      const auto chooseNearestIndex = [](const std::deque<ImuSample>& buf, int64_t target_ns) -> size_t {
+        size_t best_idx = 0;
+        int64_t best_abs = std::numeric_limits<int64_t>::max();
+        for (size_t i = 0; i < buf.size(); ++i) {
+          const int64_t d = std::llabs(buf[i].stamp.nanoseconds() - target_ns);
+          if (d < best_abs) {
+            best_abs = d;
+            best_idx = i;
+          }
+        }
+        return best_idx;
+      };
+
+      const size_t idx_start = chooseNearestIndex(g_imu_buffer, scan_start.nanoseconds());
+      size_t idx_end = chooseNearestIndex(g_imu_buffer, scan_end.nanoseconds());
+      if (idx_end == idx_start) {
+        if (idx_end + 1 < g_imu_buffer.size()) {
+          idx_end += 1;
+        } else if (idx_end > 0) {
+          idx_end -= 1;
+        }
+      }
+
+      if (idx_start != idx_end) {
+        imu.push_back(g_imu_buffer[idx_start]);
+        imu.push_back(g_imu_buffer[idx_end]);
       }
     }
   }
@@ -642,6 +681,13 @@ void registration(pcl::PointCloud<pcl::PointXYZ>::Ptr &points, pcl::PointCloud<p
 }
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr normalSpaceSampling(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud, int target_points) {
+    if (!cloud || cloud->empty()) {
+        return cloud;
+    }
+    if (cloud->size() <= 2) {
+        return cloud;
+    }
+
     // 计算法向量
     pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
     pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
@@ -662,7 +708,10 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr normalSpaceSampling(const pcl::PointCloud<pc
     nss.setInputCloud(cloud_with_normals);
     nss.setNormals(cloud_with_normals);
     nss.setBins(8, 8, 8);
-    nss.setSample(target_points);
+    // Keep sample count strictly smaller than input size to avoid repeated
+    // NormalSpaceSampling warnings under sparse/degenerate scans.
+    const int safe_target = std::max(1, std::min(target_points, static_cast<int>(cloud_with_normals->size()) - 1));
+    nss.setSample(safe_target);
     nss.filter(*sampled_cloud);
 
     // 转换回普通点云
@@ -675,9 +724,17 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr normalSpaceSampling(const pcl::PointCloud<pc
 void pointCloudProcess(pcl::PointCloud<pcl::PointXYZ>::Ptr &points_filtered) {
     auto start = std::chrono::high_resolution_clock::now();
 
+    if (!points_filtered || static_cast<int>(points_filtered->size()) < g_min_scan_points_for_registration) {
+        RCLCPP_WARN_THROTTLE(
+            g_node->get_logger(), *g_node->get_clock(), 3000,
+            "Skip sparse scan: points=%zu < min_scan_points_for_registration=%d",
+            points_filtered ? points_filtered->size() : 0, g_min_scan_points_for_registration);
+        return;
+    }
+
     // 自适应采样数量：不超过实际点云大小，避免 NormalSpaceSampling 警告
-    // 当点云较少时直接全量使用，当点云较多时采样到 4000 以控制计算量
-    int sample_target = std::min(static_cast<int>(points_filtered->size()), 4000);
+    // 当点云较少时直接全量使用，当点云较多时采样到配置上限以控制计算量
+    int sample_target = std::min(static_cast<int>(points_filtered->size()), g_scan_sample_target_max);
     if (sample_target > 50) {  // 点数太少时跳过采样，直接用原始点云
         points_filtered = normalSpaceSampling(points_filtered, sample_target);
     }
@@ -745,12 +802,12 @@ void livox_callback(const livox_ros_driver2::msg::CustomMsg::SharedPtr msg) {
         }
 
         RCLCPP_WARN_THROTTLE(
-            g_node->get_logger(), *g_node->get_clock(), 2000,
+            g_node->get_logger(), *g_node->get_clock(), 5000,
             "Deskew disabled/failed (%s). Fallback to raw scan. Turning stability may degrade.",
             deskew_fail_reason.c_str());
     }
 
-    RCLCPP_INFO_THROTTLE(g_node->get_logger(), *g_node->get_clock(), 1000,
+    RCLCPP_INFO_THROTTLE(g_node->get_logger(), *g_node->get_clock(), g_scan_status_log_interval_ms,
         "Livox scan: point_num=%u, used=%zu, deskew=%s",
         msg->point_num, points_filtered->size(), deskew_ok ? "ON" : "OFF");
 
@@ -792,7 +849,7 @@ void pcl_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
         if (distance2 < distance2_min_thr || distance2 > distance2_local_map_thr) {
             continue;
         }
-        pcl::PointXYZ pt1(pt.x, -pt.y, -pt.z); 
+        pcl::PointXYZ pt1(pt.x, -pt.y, -pt.z);
         points_filtered->push_back(pt1);
     }
     t_msg = msg->header.stamp;

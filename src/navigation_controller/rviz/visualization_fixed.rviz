@@ -329,6 +329,61 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /dwa_path_visualization
       Value: true
+    
+
+
+    # ==** 20260416 York, before verification real robot
+    # ========================================================================
+    # DWA当前选中轨迹 - 当前控制周期真正执行的局部轨迹
+    # 作用: 与候选轨迹分离显示，快速定位“为何机器人此刻这样走”
+    # ========================================================================
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: DWA Selected Path
+      Namespaces:
+        {}
+      Topic:
+        Depth: 10
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /dwa_selected_path
+      Value: true
+    
+    # ========================================================================
+    # 实际行走轨迹(当前任务) - 由 odom 累积生成
+    # 设计目标: 每个新任务会清空旧轨迹，只保留当前目标点对应的走行历史
+    # ========================================================================
+    - Alpha: 1.0
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 255; 165; 0
+      Enabled: true
+      Head Diameter: 0.15
+      Head Length: 0.12
+      Length: 0.15
+      Line Style: Billboards
+      Line Width: 0.18
+      Name: Walked Path (Current Task)
+      Offset:
+        X: 0.0
+        Y: 0.0
+        Z: 0.0
+      Pose Color: 255; 255; 255
+      Pose Style: None
+      Radius: 0.03
+      Shaft Diameter: 0.05
+      Shaft Length: 0.08
+      Topic:
+        Depth: 10
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /dwa_walked_path
+      Value: true
+    # ==** 20260416 York, before verification real robot
+
+
 
     # ========================================================================
     # 检测到的障碍物 - DWA点云聚类结果

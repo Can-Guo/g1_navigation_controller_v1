@@ -30,62 +30,20 @@ Hardware Integration (2025-11-26):
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from rclpy.duration import Duration as RCLDuration
-from rclpy.time import Time
 
 from nav_msgs.msg import Odometry, Path
 from geometry_msgs.msg import PoseStamped, Twist, Point
 from std_msgs.msg import Bool
 import math
-import numpy as np
 import time
-import os
-import sys
 import datetime
+from common_sdk_loader import bootstrap_unitree_sdk
 
-# 🔧 紧急修复: 动态添加 unitree_sdk2py 路径到 sys.path
-# 解决 launch 文件启动时 PYTHONPATH 未正确继承的问题
-unitree_sdk_path_added = False
-try:
-    # 方法1: 从 ROS2 安装目录搜索
-    from ament_index_python.packages import get_package_prefix
-    try:
-        unitree_sdk_prefix = get_package_prefix('unitree_sdk2py')
-        unitree_sdk_path = os.path.join(unitree_sdk_prefix, 'lib', 'python3.10', 'site-packages')
-        if os.path.exists(unitree_sdk_path):
-            if unitree_sdk_path not in sys.path:
-                sys.path.insert(0, unitree_sdk_path)
-            unitree_sdk_path_added = True
-            print(f"[SDK路径] 方法1成功: {unitree_sdk_path}", file=sys.stderr)
-    except Exception as e1:
-        print(f"[SDK路径] 方法1失败: {e1}", file=sys.stderr)
-        # 方法2: 从工作空间推断路径
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        workspace_root = os.path.realpath(os.path.join(script_dir, '..', '..', '..', '..'))
-        unitree_sdk_path = os.path.join(workspace_root, 'install', 'unitree_sdk2py', 'lib', 'python3.10', 'site-packages')
-        if os.path.exists(unitree_sdk_path):
-            if unitree_sdk_path not in sys.path:
-                sys.path.insert(0, unitree_sdk_path)
-            unitree_sdk_path_added = True
-            print(f"[SDK路径] 方法2成功: {unitree_sdk_path}", file=sys.stderr)
-        else:
-            print(f"[SDK路径] 方法2失败: 路径不存在 {unitree_sdk_path}", file=sys.stderr)
-except Exception as e:
-    print(f"[SDK路径] 致命错误: {e}", file=sys.stderr)
-
-# Unitree SDK 导入 (可选,仿真模式不需要)
-UNITREE_SDK_AVAILABLE = False
-LocoClient = None
-ChannelFactoryInitialize = None
-
-try:
-    from unitree_sdk2py.core.channel import ChannelFactoryInitialize
-    from unitree_sdk2py.g1.loco.g1_loco_client import LocoClient
-    UNITREE_SDK_AVAILABLE = True
-    print(f"[SDK导入] ✅ unitree_sdk2py 导入成功", file=sys.stderr)
-except ImportError as e:
-    print(f"[SDK导入] ❌ 导入失败: {e}", file=sys.stderr)
-    print(f"[SDK导入] sys.path: {[p for p in sys.path if 'unitree' in p]}", file=sys.stderr)
+# 统一复用 SDK 引导逻辑，减少双控制器脚本重复维护成本。
+_sdk_bootstrap = bootstrap_unitree_sdk()
+UNITREE_SDK_AVAILABLE = _sdk_bootstrap['available']
+LocoClient = _sdk_bootstrap['loco_client_cls']
+ChannelFactoryInitialize = _sdk_bootstrap['channel_factory_init']
 
 
 class G1PositionControl(Node):
@@ -99,8 +57,12 @@ class G1PositionControl(Node):
         self.declare_parameter('max_linear_speed', 0.3)
         self.declare_parameter('max_angular_speed', 0.45)  # 🔧 降低角速度避免定位丢失 (0.3 → 0.12)
         self.declare_parameter('use_hardware', False)  # 🆕 是否使用实体硬件
-        self.declare_parameter('network_interface', 'ens37')  # 🆕 网络接口
+        self.declare_parameter('network_interface', 'ens33')  # 🆕 网络接口
         self.declare_parameter('cmd_timeout', 0.5)  # 🆕 命令超时时间
+        # 安全开关：
+        # - false(默认): 必须由 Action Server 发布 /navigation_active 才允许运动
+        # - true: 允许 RViz 2D Goal 在无 Action 激活时直接驱动
+        self.declare_parameter('allow_rviz_goal_without_action', False)
         
         # 获取参数值
         self.waypoint_distance = self.get_parameter('waypoint_distance').value
@@ -110,6 +72,7 @@ class G1PositionControl(Node):
         self.use_hardware = self.get_parameter('use_hardware').value
         self.network_interface = self.get_parameter('network_interface').value
         self.cmd_timeout = self.get_parameter('cmd_timeout').value
+        self.allow_rviz_goal_without_action = self.get_parameter('allow_rviz_goal_without_action').value
         
         # 初始化目标位置标志
         self.has_goal = False
@@ -224,6 +187,8 @@ class G1PositionControl(Node):
         # 导航激活标志 (由 Action Server 控制)
         self.navigation_active = False
         self.last_active_time = self.get_clock().now()
+        # RViz直驱模式标志（仅在 allow_rviz_goal_without_action=true 时可启用）
+        self.rviz_direct_active = False
         
         # 初始化cmd_vel日志文件
         _script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -366,6 +331,8 @@ class G1PositionControl(Node):
         if was_active != self.navigation_active:
             if self.navigation_active:
                 self.get_logger().info("🚀 导航已激活 - Action Server 开始新任务")
+                # Action 接管时，关闭 RViz 直驱。
+                self.rviz_direct_active = False
                 # 🔧 完整重置所有状态变量（避免任务间污染）
                 self.current_waypoint_index = 0
                 self.last_waypoint_index = -1
@@ -409,6 +376,13 @@ class G1PositionControl(Node):
             f"y={msg.pose.position.y:.2f}, "
             f"frame_id={msg.header.frame_id}"
         )
+
+        if self.allow_rviz_goal_without_action and not self.navigation_active:
+            self.rviz_direct_active = True
+            self.get_logger().warn(
+                "⚠️ RViz直驱模式已启用: 当前未收到 Action 激活信号，"
+                "将按 /move_base_simple/goal 直接执行。"
+            )
         
     def path_callback(self, msg):
         """处理路径消息"""
@@ -625,21 +599,26 @@ class G1PositionControl(Node):
     
     def control_loop(self):
         """主控制循环 (ROS2: No event parameter)"""
-        # 🆕 检查导航是否激活 (Action Server 控制)
+        # 默认：Action 安全门控；可选：RViz 直驱门控
         if not self.navigation_active:
-            # 导航未激活时,确保机器人停止
-            self._send_velocity_command(0.0, 0.0, 0.0)
-            return
-        
-        # 检查激活信号超时 (5秒无更新则视为 Action Server 异常)
-        elapsed = (self.get_clock().now() - self.last_active_time).nanoseconds / 1e9
-        if elapsed > 5.0:
+            if not (self.allow_rviz_goal_without_action and self.rviz_direct_active):
+                # 导航未激活时,确保机器人停止
+                self._send_velocity_command(0.0, 0.0, 0.0)
+                return
             self.get_logger().warn(
-                f"导航激活信号超时 ({elapsed:.1f}s 无更新) - 停止机器人",
+                "RViz直驱模式运行中（绕过 Action /navigation_active 门控）",
                 throttle_duration_sec=2.0
             )
-            self._send_velocity_command(0.0, 0.0, 0.0)
-            return
+        else:
+            # 仅 Action 模式检查激活信号超时
+            elapsed = (self.get_clock().now() - self.last_active_time).nanoseconds / 1e9
+            if elapsed > 5.0:
+                self.get_logger().warn(
+                    f"导航激活信号超时 ({elapsed:.1f}s 无更新) - 停止机器人",
+                    throttle_duration_sec=2.0
+                )
+                self._send_velocity_command(0.0, 0.0, 0.0)
+                return
         
         # 如果没有当前位置，则返回
         if not self.current_pose:
@@ -696,6 +675,7 @@ class G1PositionControl(Node):
             if self.has_path and self.current_waypoint_index >= len(self.waypoints):
                 self.get_logger().info("路径导航完成，停止移动")
                 self.has_path = False
+                self.rviz_direct_active = False
             return
         
         # 如果处于避障模式，不执行A*路径跟踪
@@ -734,6 +714,7 @@ class G1PositionControl(Node):
             
             # 清除目标，避免重复控制
             self.has_goal = False
+            self.rviz_direct_active = False
             self.get_logger().info("到达最终目标位置，停止移动")
             return
         

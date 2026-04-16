@@ -13,7 +13,7 @@ TF 树监测工具
 使用方法:
     python3 tf_tree_monitor.py
     或
-    ros2 run g1_nav tf_tree_monitor.py
+    ros2 run navigation_controller tf_tree_monitor.py
 
 Author: GitHub Copilot
 Date: 2025-11-04

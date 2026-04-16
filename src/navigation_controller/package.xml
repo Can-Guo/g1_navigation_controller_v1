@@ -33,6 +33,8 @@
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>python3-transforms3d</exec_depend>
+  <!-- scipy: distance_transform_edt (costmap 膨胀层) + Rotation (四元数转换) -->
+  <exec_depend>python3-scipy</exec_depend>
   
   <!-- Execution dependencies -->
   <exec_depend>nav2_map_server</exec_depend>

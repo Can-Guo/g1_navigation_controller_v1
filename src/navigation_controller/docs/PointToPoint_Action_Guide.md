@@ -577,7 +577,7 @@ waypoint_distance: 0.5
 goal_tolerance: 0.3
 
 # 硬件配置
-network_interface: 'ens37'
+network_interface: 'ens33'
 use_hardware: false
 
 # 地图文件

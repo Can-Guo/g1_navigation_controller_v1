@@ -58,61 +58,22 @@ Hardware Integration:
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from rclpy.duration import Duration as RCLDuration
-from rclpy.time import Time
 
 from nav_msgs.msg import Odometry, Path
 from geometry_msgs.msg import PoseStamped, Twist, Point
 from std_msgs.msg import Bool
 import math
-import numpy as np
 import time
-import os
-import sys
 from enum import Enum
 from collections import deque
 import datetime
+from common_sdk_loader import bootstrap_unitree_sdk
 
-# 🔧 紧急修复: 动态添加 unitree_sdk2py 路径到 sys.path
-unitree_sdk_path_added = False
-try:
-    from ament_index_python.packages import get_package_prefix
-    try:
-        unitree_sdk_prefix = get_package_prefix('unitree_sdk2py')
-        unitree_sdk_path = os.path.join(unitree_sdk_prefix, 'lib', 'python3.10', 'site-packages')
-        if os.path.exists(unitree_sdk_path):
-            if unitree_sdk_path not in sys.path:
-                sys.path.insert(0, unitree_sdk_path)
-            unitree_sdk_path_added = True
-            print(f"[SDK路径] 方法1成功: {unitree_sdk_path}", file=sys.stderr)
-    except Exception as e1:
-        print(f"[SDK路径] 方法1失败: {e1}", file=sys.stderr)
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        workspace_root = os.path.realpath(os.path.join(script_dir, '..', '..', '..', '..'))
-        unitree_sdk_path = os.path.join(workspace_root, 'install', 'unitree_sdk2py', 'lib', 'python3.10', 'site-packages')
-        if os.path.exists(unitree_sdk_path):
-            if unitree_sdk_path not in sys.path:
-                sys.path.insert(0, unitree_sdk_path)
-            unitree_sdk_path_added = True
-            print(f"[SDK路径] 方法2成功: {unitree_sdk_path}", file=sys.stderr)
-        else:
-            print(f"[SDK路径] 方法2失败: 路径不存在 {unitree_sdk_path}", file=sys.stderr)
-except Exception as e:
-    print(f"[SDK路径] 致命错误: {e}", file=sys.stderr)
-
-# Unitree SDK 导入 (可选,仿真模式不需要)
-UNITREE_SDK_AVAILABLE = False
-LocoClient = None
-ChannelFactoryInitialize = None
-
-try:
-    from unitree_sdk2py.core.channel import ChannelFactoryInitialize
-    from unitree_sdk2py.g1.loco.g1_loco_client import LocoClient
-    UNITREE_SDK_AVAILABLE = True
-    print(f"[SDK导入] ✅ unitree_sdk2py 导入成功", file=sys.stderr)
-except ImportError as e:
-    print(f"[SDK导入] ❌ 导入失败: {e}", file=sys.stderr)
-    print(f"[SDK导入] sys.path: {[p for p in sys.path if 'unitree' in p]}", file=sys.stderr)
+# 统一复用 SDK 引导逻辑，减少双控制器脚本重复维护成本。
+_sdk_bootstrap = bootstrap_unitree_sdk()
+UNITREE_SDK_AVAILABLE = _sdk_bootstrap['available']
+LocoClient = _sdk_bootstrap['loco_client_cls']
+ChannelFactoryInitialize = _sdk_bootstrap['channel_factory_init']
 
 
 class MovementAxis(Enum):
@@ -156,6 +117,11 @@ class G1ManhattanPositionControl(Node):
         self.declare_parameter('max_linear_speed', 0.3)
         self.declare_parameter('max_angular_speed', 0.45)
         self.declare_parameter('use_hardware', False)
+        self.declare_parameter('network_interface', 'ens33')
+        # 安全开关：
+        # - false(默认): 仅 Action Server 激活时允许执行控制
+        # - true: 允许 RViz 2D Goal 在无 Action 激活时直接驱动
+        self.declare_parameter('allow_rviz_goal_without_action', False)
         
         # Manhattan-specific parameters
         self.declare_parameter('axis_switch_hysteresis', 0.10)  # 防止抖动的滞环
@@ -169,6 +135,8 @@ class G1ManhattanPositionControl(Node):
         self.max_linear_speed = self.get_parameter('max_linear_speed').value
         self.max_angular_speed = self.get_parameter('max_angular_speed').value
         self.use_hardware = self.get_parameter('use_hardware').value
+        self.network_interface = self.get_parameter('network_interface').value
+        self.allow_rviz_goal_without_action = self.get_parameter('allow_rviz_goal_without_action').value
         
         # Manhattan特定参数
         self.axis_switch_hysteresis = self.get_parameter('axis_switch_hysteresis').value
@@ -223,11 +191,11 @@ class G1ManhattanPositionControl(Node):
         self.hardware_mode = False
         self.loco_client = None
         self.last_hardware_cmd_time = 0
-        self.network_interface = "ens37"  # G1默认网口
         
         # 导航激活状态
         self.navigation_active = False
         self.last_active_time = self.get_clock().now()
+        self.rviz_direct_active = False
         
         # 初始化cmd_vel日志文件
         _script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -315,6 +283,7 @@ class G1ManhattanPositionControl(Node):
         self.get_logger().info(
             f"🔲 Manhattan导航控制节点已启动 [{mode_str}]\n"
             f"   运动约束: 单轴移动 (X或Y，不能同时)\n"
+            f"   请求硬件控制: {self.use_hardware}, 网络接口: {self.network_interface}\n"
             f"   轴切换滞环: {self.axis_switch_hysteresis:.3f}m\n"
             f"   轴对齐容差: {self.axis_tolerance:.3f}m\n"
             f"   朝向容差: {self.orientation_tolerance:.2f} rad"
@@ -423,6 +392,7 @@ class G1ManhattanPositionControl(Node):
         if was_active != self.navigation_active:
             if self.navigation_active:
                 self.get_logger().info("🚀 Manhattan导航已激活")
+                self.rviz_direct_active = False
                 self.current_waypoint_index = 0
                 self.last_waypoint_index = -1
                 self.last_robot_position = None
@@ -460,6 +430,12 @@ class G1ManhattanPositionControl(Node):
             f"🎯 收到新目标: x={msg.pose.position.x:.2f}, "
             f"y={msg.pose.position.y:.2f}"
         )
+
+        if self.allow_rviz_goal_without_action and not self.navigation_active:
+            self.rviz_direct_active = True
+            self.get_logger().warn(
+                "⚠️ Manhattan RViz直驱模式已启用：当前未收到 Action 激活信号。"
+            )
     
     def path_callback(self, msg):
         """处理路径消息"""
@@ -919,20 +895,25 @@ class G1ManhattanPositionControl(Node):
         4. Update waypoint progress
         5. Execute Manhattan control step
         """
-        # Check navigation activation
+        # Check navigation activation (or optional RViz direct-drive mode)
         if not self.navigation_active:
-            self._send_velocity_command(0.0, 0.0, 0.0)
-            return
-        
-        # Check activation timeout
-        elapsed = (self.get_clock().now() - self.last_active_time).nanoseconds / 1e9
-        if elapsed > 5.0:
+            if not (self.allow_rviz_goal_without_action and self.rviz_direct_active):
+                self._send_velocity_command(0.0, 0.0, 0.0)
+                return
             self.get_logger().warn(
-                f"导航激活信号超时 ({elapsed:.1f}s) - 停止机器人",
+                "Manhattan RViz直驱模式运行中（绕过 Action /navigation_active 门控）",
                 throttle_duration_sec=2.0
             )
-            self._send_velocity_command(0.0, 0.0, 0.0)
-            return
+        else:
+            # Action mode timeout guard
+            elapsed = (self.get_clock().now() - self.last_active_time).nanoseconds / 1e9
+            if elapsed > 5.0:
+                self.get_logger().warn(
+                    f"导航激活信号超时 ({elapsed:.1f}s) - 停止机器人",
+                    throttle_duration_sec=2.0
+                )
+                self._send_velocity_command(0.0, 0.0, 0.0)
+                return
         
         # Check prerequisites
         if not self.current_pose:
@@ -978,6 +959,7 @@ class G1ManhattanPositionControl(Node):
                 self.get_logger().info("✓ Manhattan路径导航完成")
                 self.has_path = False
                 self.state = ManhattanState.REACHED
+                self.rviz_direct_active = False
             return
         
         # Skip Manhattan control during DWA avoidance

@@ -54,7 +54,7 @@ PointToPoint Navigation Action Server - G1 Unitree Robot
         用途: 触发全局路径规划
 
 服务提供:
-    - ~/point_to_point (g1_nav/PointToPoint.action)
+    - ~/point_to_point (robot_interfaces/PointToPoint.action)
         Action 服务器主接口
 
 安全机制:
@@ -92,7 +92,7 @@ from std_msgs.msg import Bool, Float32
 from sensor_msgs_py import point_cloud2
 
 # 自定义 Action 接口
-# from g1_nav.action import PointToPoint
+# from navigation_controller.action import PointToPoint
 from robot_interfaces.action import PointToPoint
 
 class PointToPointActionServer(Node):

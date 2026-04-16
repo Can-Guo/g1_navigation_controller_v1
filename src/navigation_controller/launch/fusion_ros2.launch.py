@@ -50,6 +50,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, NotSubstitution, AndSubstitution, PythonExpression
 from launch.conditions import IfCondition, UnlessCondition
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -94,6 +95,7 @@ def generate_launch_description():
     default_use_rviz = str(env_config.get('use_rviz', 'true')).lower()
     default_rviz_config = env_config.get('rviz_config', 'visualization_fixed.rviz')
     default_cmd_timeout = str(env_config.get('cmd_timeout', 0.5))
+    default_allow_rviz_goal_without_action = str(env_config.get('allow_rviz_goal_without_action', 'false')).lower()
     # Localization confidence level policy (for logging and operator awareness)
     # NOTE: runtime threshold enforcement is implemented in action server nodes.
     default_conf_green = str(env_config.get('localization_confidence_green_threshold', 0.45))
@@ -187,6 +189,23 @@ def generate_launch_description():
         description=f'Whether to launch mid360_locate localization node (from config_env.yaml: {default_use_localization})'
     )
 
+    # Deskew pipeline control:
+    # - true:  livox driver publishes CustomMsg (xfer_format=1) + locate_node points_type=0
+    #          -> per-point offset_time deskew can take effect
+    # - false: livox driver publishes PointCloud2 (xfer_format=0) + locate_node points_type=1
+    #          -> deskew path disabled (compatibility mode)
+    enable_per_point_time_deskew_arg = DeclareLaunchArgument(
+        'enable_per_point_time_deskew',
+        default_value='true',
+        description='Enable true per-point-time deskew pipeline (CustomMsg + offset_time).'
+    )
+
+    show_deskew_status_log_arg = DeclareLaunchArgument(
+        'show_deskew_status_log',
+        default_value='true',
+        description='Show deskew effective-status block in startup log.'
+    )
+
     # Odometry source for nodes that need a continuously-updated pose.
     # - Hardware/localization mode: use EKF output (/odometry/ekf) to get stable odom-frame state
     # - Simulation/no-localization mode: use simulated odometry (/odometry/map) generated from static TF
@@ -241,6 +260,15 @@ def generate_launch_description():
         'cmd_timeout',
         default_value=default_cmd_timeout,
         description=f'Timeout for hardware command validity (from config_env.yaml: {default_cmd_timeout} s)'
+    )
+
+    allow_rviz_goal_without_action_arg = DeclareLaunchArgument(
+        'allow_rviz_goal_without_action',
+        default_value=default_allow_rviz_goal_without_action,
+        description=(
+            'Allow RViz /move_base_simple/goal to drive robot without Action activation '
+            f'(from config_env.yaml: {default_allow_rviz_goal_without_action})'
+        )
     )
     
     # A* algorithm selection
@@ -499,8 +527,16 @@ def generate_launch_description():
         parameters=[{
             # ========== 基础配置 ==========
             'map_file_path': LaunchConfiguration('pcd_file'),
-            'points_type': 1,  # 0 for Mid360 Livox format, 1 for PointCloud2
-            # 🔧 改为 1 (PointCloud2): 配合 livox xfer_format=0，统一使用标准 PointCloud2 格式
+            # NOTE:
+            # - enable_per_point_time_deskew=true  -> points_type=0 (CustomMsg, deskew effective)
+            # - enable_per_point_time_deskew=false -> points_type=1 (PointCloud2, deskew bypassed)
+            'points_type': ParameterValue(
+                PythonExpression([
+                    '0 if "', LaunchConfiguration('enable_per_point_time_deskew'),
+                    '" == "true" else 1'
+                ]),
+                value_type=int
+            ),
             'topic_name': '/livox/lidar',
             'map_roll': 0.0,
             'map_pitch': 0.0,
@@ -571,9 +607,13 @@ def generate_launch_description():
             # 7. 发布频率控制
             'publish_rate': 10.0,  # TF 发布频率 (Hz)
             'map_publish_rate': 1.0,  # 地图点云发布频率 (Hz)
+            # 性能优化参数：降低计算/渲染压力，提高实时性
+            'scan_sample_target_max': 2500,
+            'min_scan_points_for_registration': 800,
+            'scan_status_log_interval_ms': 3000,
             
             # 8. 调试选项
-            'verbose': True,  # 详细日志输出
+            'verbose': False,  # 降低终端日志压力
             'publish_aligned_cloud': True,  # 发布对齐后的点云
             'publish_fitness_score': True,  # 发布配准适应度分数
         }],
@@ -631,41 +671,66 @@ def generate_launch_description():
         )
     )
     
-    # DWA Local Planner with Obstacle Avoidance
-    # Dynamic Window Approach for real-time collision avoidance
-    # Subscribes: /aligned (point cloud), /odometry/map, /astar_path
-    # Publishes: /dwa_cmd_vel, /dwa_obstacles, /dwa_path_visualization
-    # 
-    # 🔧 IMU融合升级: 将 /odometry/filtered 重映射到 /odometry/ekf
-    # 使用 EKF 融合后的里程计,提高旋转时的定位稳定性
+    # DWA Local Planner with Obstacle Avoidance (Phase 1: Nav2 Costmap 版)
+    # Dynamic Window Approach + Nav2 风格 LocalCostmap 替代原始 DBSCAN 点云聚类
+    #
+    # 障碍物检测管线:
+    #   PointCloud2 → TF变换 → 高度/距离/角度过滤 → Costmap 标记 → 膨胀层 → DWA 轨迹评分
+    #
+    # Subscribes: /aligned (point cloud), /odometry/filtered (EKF), /astar_path
+    # Publishes:  /dwa_cmd_vel, /dwa_local_costmap (OccupancyGrid), /obstacle_status (Point),
+    #             /detected_obstacles (MarkerArray), /filtered_points (Marker)
+    #
+    # 🔧 IMU融合升级: /odometry/filtered 重映射到 /odometry/ekf (硬件) 或 /odometry/map (仿真)
     dwa_planner_node = Node(
         package='navigation_controller',
         executable='dwa_planner_ros2_mid360.py',
         name='dwa_planner',
         output='screen',
         parameters=[{
-            # 🔧 速度参数优化 - 降低转弯速度避免定位发散
-            'max_speed': 0.20,  # 🚨 进一步降低线速度 (从 0.25 改为 0.20)
-            'min_speed': 0.05,  # 降低最小速度 (从 0.08 改为 0.05)
-            'max_turn': 0.08,  # 🔧 紧急降速: 避免运动畸变 (从 0.12 改为 0.08)
+            # ---- DWA 速度参数 ----
+            'max_speed': 0.20,
+            'min_speed': 0.05,
+            'max_turn': 0.08,
             
-            # 🔧 障碍物检测优化 - 避免过度敏感
-            'detection_range': 1.5,  # 增加检测范围 (从 1.2 改为 1.5)
-            'time_horizon': 1.5,  # 增加预测时间 (从 1.0 改为 1.5)
-            'min_obstacle_points': 60,  # 🔧 提高阈值避免误检 (从 40 改为 60)
-            'clustering_distance': 0.4,  # 增加聚类距离 (从 0.3 改为 0.4)
+            # ---- 障碍物检测范围 ----
+            'detection_range': 1.5,  # costmap 查询的最大距离 (米)
+            'time_horizon': 1.5,     # DWA 轨迹前向预测时间 (秒)
+
+            # ---- 兼容旧版参数 (已声明但不再影响 costmap 逻辑) ----
+            'min_obstacle_points': 60,
+            'clustering_distance': 0.4,
             
-            # 平滑参数
-            'smooth_factor': 0.3,  # 增加平滑系数 (从 0.2 改为 0.3)
+            # ---- Nav2 Costmap 参数 (Phase 1, 适配 1.0m 走廊) ----
+            # 局部代价地图尺寸: 应 >= 2 × detection_range
+            'costmap_width': 4.0,          # 地图宽度 (米)
+            'costmap_height': 4.0,         # 地图高度 (米)
+            'costmap_resolution': 0.05,    # 栅格分辨率 (米/格, 越小越精细)
+            # 膨胀参数: 基于 G1 宽度 0.55m + 1.0m 走廊约束
+            'robot_radius': 0.30,          # G1 半宽 0.275m + 0.025m 安全余量
+            'inflation_radius': 0.45,      # < 走廊半宽 0.50m, 留 10cm 零代价中心通道
+            'cost_scaling_factor': 8.0,    # 陡峭梯度: 高代价集中近墙, 走廊中心干净
+            'obstacle_decay_factor': 0.90, # 障碍物时间衰减因子 (0~1), 10Hz 下约 2 秒衰减
+            # DWA 激活门槛: 仅 INSCRIBED(253) 触发, 走廊墙壁梯度不误触发
+            'obstacle_cost_threshold': 253,
+            # 窄走廊适配: 收窄前方扫描锥角, 避免侧墙持续触发 DWA
+            'obstacle_detection_half_angle': 0.52,  # ≈30°, 只关注前方路径
+            'min_obstacle_samples': 8,     # 至少 8 个高代价采样点才触发 (过滤墙壁边缘)
+            # 高度过滤: 只保留此范围内的点云 (G1 行走平面)
+            'obstacle_min_height': -0.3,
+            'obstacle_max_height': 0.6,
             
-            # 调试参数
+            # ---- 平滑与控制参数 ----
+            'smooth_factor': 0.3,
+            
+            # ---- 调试参数 ----
             'debug': False,
             'debug_interval': 2.0,
             'loop_rate': 10.0,
             'use_sim_time': False
         }],
         remappings=[
-            ('/odometry/filtered', LaunchConfiguration('odom_topic'))  # 🔧 硬件用EKF/仿真用模拟里程计
+            ('/odometry/filtered', LaunchConfiguration('odom_topic'))
         ],
         respawn=True,
         respawn_delay=2.0
@@ -708,6 +773,7 @@ def generate_launch_description():
             'use_hardware': LaunchConfiguration('use_hardware'),  # 🆕 硬件/仿真模式切换
             'network_interface': LaunchConfiguration('hardware_interface'),  # 🆕 SDK网络接口
             'cmd_timeout': LaunchConfiguration('cmd_timeout'),  # 🆕 命令超时
+            'allow_rviz_goal_without_action': LaunchConfiguration('allow_rviz_goal_without_action'),
         }],
         # Note: g1_position_control currently uses /odometry/map for path following (map frame).
         # DWA uses odom_topic for local avoidance. Keep controller remap minimal here.
@@ -779,6 +845,15 @@ def generate_launch_description():
             PythonLaunchDescriptionSource(
                 os.path.join(livox_driver_dir, 'launch_ROS2', 'msg_MID360_launch.py')
             ),
+            launch_arguments={
+                # Keep Livox message format aligned with locate_node points_type.
+                # true  -> xfer_format=1 (CustomMsg, includes per-point offset_time)
+                # false -> xfer_format=0 (PointCloud2)
+                'xfer_format': PythonExpression([
+                    '"1" if "', LaunchConfiguration('enable_per_point_time_deskew'),
+                    '" == "true" else "0"'
+                ])
+            }.items(),
             condition=IfCondition(LaunchConfiguration('use_livox'))
         )
     else:
@@ -858,6 +933,7 @@ def generate_launch_description():
             '\n',
             'Hardware Control (Dual-Channel Architecture):\n',
             '  - Use Hardware: ', LaunchConfiguration('use_hardware'), '\n',
+            '  - Allow RViz Goal Without Action: ', LaunchConfiguration('allow_rviz_goal_without_action'), '\n',
             '  - Network Interface: ', LaunchConfiguration('hardware_interface'), '\n',
             '  - Active Control Mode: ',
             PythonExpression([
@@ -872,6 +948,7 @@ def generate_launch_description():
             'Important Notes:\n',
             '  - 🔒 Safety Gate: hardware control is OFF by default.\n',
             '  - 🔒 To enable real robot motion, user MUST launch with: use_hardware:=true\n',
+            '  - 🔒 Action gate is ON by default; RViz direct-drive requires: allow_rviz_goal_without_action:=true\n',
             '  - 🎮 Simulation Mode: Robot visualization at origin, use RViz "2D Pose Estimate" to set position\n',
             '  - 🤖 Hardware Mode: locate_node publishes real-time pose, waits for /initialpose from RViz\n',
             '  - 🤖 Hardware Mode: /points_map (PCD map) published at 1Hz for visualization\n',
@@ -890,6 +967,8 @@ def generate_launch_description():
         use_rviz_arg,
         use_livox_arg,
         use_localization_arg,
+        enable_per_point_time_deskew_arg,
+        show_deskew_status_log_arg,
         odom_topic_arg,
         waypoint_distance_arg,
         goal_tolerance_arg,
@@ -898,6 +977,7 @@ def generate_launch_description():
         use_hardware_arg,          # 🆕 硬件模式参数
         hardware_interface_arg,    # 🆕 SDK网络接口
         cmd_timeout_arg,           # 🆕 命令超时
+        allow_rviz_goal_without_action_arg,  # 🆕 RViz直驱模式开关
         astar_algorithm_arg,       # 🆕 A*算法类型
         
         # ========== Startup Log ==========
@@ -942,7 +1022,7 @@ With Manhattan distance A* algorithm:
 Hardware mode (G1 robot with Unitree SDK):
     ros2 launch navigation_controller fusion_ros2.launch.py \\
         use_hardware:=true \\
-        hardware_interface:=ens37
+        hardware_interface:=ens33
 
 Hardware mode with custom interface:
     ros2 launch navigation_controller fusion_ros2.launch.py \\
@@ -971,7 +1051,7 @@ Pure simulation (no hardware sensors):
 Full custom configuration (hardware mode):
     ros2 launch navigation_controller fusion_ros2.launch.py \\
         use_hardware:=true \\
-        hardware_interface:=ens37 \\
+        hardware_interface:=ens33 \\
         map_file:=/home/york/maps/custom_map.yaml \\
         max_linear_speed:=0.4 \\
         waypoint_distance:=0.3 \\

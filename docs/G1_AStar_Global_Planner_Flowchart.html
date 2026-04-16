@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A* Global Planner — Algorithm Flow &amp; Step-by-Step Specification</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { --navy:#0c1e33; --blue:#2c6fbb; --green:#1e6f4e; --orange:#c05621; --slate:#4a5568; --bg:#f7f9fc; --card:#fff; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:'Inter',sans-serif; font-size:10.5pt; line-height:1.55; color:#1a2332; background:var(--bg); max-width:920px; margin:0 auto; padding:28px 24px 48px; }
+  header { border-bottom:3px solid var(--navy); padding-bottom:16px; margin-bottom:24px; }
+  header h1 { font-size:1.45rem; color:var(--navy); }
+  header .sub { font-size:0.88rem; color:var(--slate); margin-top:8px; }
+  h2 { font-size:1.05rem; color:var(--navy); margin:28px 0 12px; padding-bottom:6px; border-bottom:2px solid #c9a227; }
+  h3 { font-size:0.95rem; color:#2c3e50; margin:16px 0 8px; }
+  p { margin-bottom:10px; }
+  ul, ol { margin:8px 0 12px 22px; }
+  li { margin-bottom:5px; }
+  code, .mono { font-family:'JetBrains Mono',monospace; font-size:0.85em; background:#eef2f7; padding:1px 6px; border-radius:3px; }
+  .eq { font-family:'Times New Roman',serif; font-style:italic; background:#f0f4f8; padding:2px 8px; border-radius:4px; margin:0 2px; }
+  .figure-wrap { background:var(--card); border:1px solid #dce2eb; border-radius:12px; padding:20px 12px 16px; margin:18px 0; overflow-x:auto; box-shadow:0 4px 16px rgba(12,30,51,0.06); }
+  .fig-label { font-size:0.7rem; font-weight:700; letter-spacing:0.1em; color:#c05621; text-transform:uppercase; margin-bottom:6px; }
+  .caption { font-size:0.82rem; color:var(--slate); font-style:italic; text-align:center; margin-top:12px; }
+  table { width:100%; border-collapse:collapse; font-size:0.88rem; margin:12px 0; background:var(--card); }
+  th { background:var(--navy); color:#fff; text-align:left; padding:8px 10px; }
+  td { border:1px solid #dce2eb; padding:8px 10px; vertical-align:top; }
+  tr:nth-child(even) td { background:#fafbfd; }
+  .step { display:flex; gap:12px; margin:12px 0; align-items:flex-start; }
+  .step-num { flex-shrink:0; width:28px; height:28px; background:var(--navy); color:#fff; border-radius:8px; font-weight:700; font-size:0.85rem; display:flex; align-items:center; justify-content:center; }
+  .step-body { flex:1; }
+  .note { border-left:4px solid var(--blue); background:#e8f4fc; padding:10px 14px; margin:14px 0; font-size:0.92rem; }
+  svg text { font-family:'Inter',sans-serif; }
+  footer { margin-top:32px; font-size:0.78rem; color:#888; text-align:center; border-top:1px solid #dce2eb; padding-top:12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>A* (A-Star) Global Planner — Flowchart &amp; Logical Procedure</h1>
+  <div class="sub">
+    Reference implementation: <code>navigation_controller/scripts/astar_planner_ros2.py</code> · ROS&nbsp;2 Humble<br>
+    Role: compute a collision-free sequence of waypoints on an occupancy grid from current pose to goal, then publish <code>/astar_path</code> for the local planner and controller.
+  </div>
+</header>
+
+<p>
+  <strong>Problem statement.</strong> Given a 2D grid map where each cell is <em>free</em> or <em>occupied</em>, a start cell <span class="mono">s</span> and a goal cell <span class="mono">g</span>,
+  find a minimum-cost path from <span class="mono">s</span> to <span class="mono">g</span> moving only through free cells.
+  <strong>A*</strong> is a <em>best-first</em> search that uses an admissible or informed <strong>heuristic</strong> to expand fewer nodes than Dijkstra’s algorithm while still guaranteeing optimality when the heuristic is admissible and costs are consistent.
+</p>
+
+<h2>1. Conceptual formula (why A* is “logical”)</h2>
+<p>For each grid cell <span class="mono">n</span>:</p>
+<ul>
+  <li><strong>g(n)</strong> — actual cost from <strong>start → n</strong> along the best path found so far (cumulative step costs).</li>
+  <li><strong>h(n)</strong> — heuristic estimate of cost from <strong>n → goal</strong> (must be fast to compute; in this project: Euclidean distance, optionally augmented with a turn penalty).</li>
+  <li><strong>f(n) = g(n) + h(n)</strong> — priority score; the algorithm always expands the node in the <em>open set</em> with the <strong>smallest f</strong> first.</li>
+</ul>
+<p class="note">
+  <strong>Implementation detail:</strong> The code stores <code>g_score</code> and <code>f_score</code> dictionaries keyed by <code>(x, y)</code> map indices, and uses Python’s <code>heapq</code> as a min-heap on <code>f</code> for the open list.
+</p>
+
+<h2>2. Master flowchart — from map input to <code>/astar_path</code></h2>
+<p>The planner is not “only A*”: it wraps <strong>map preprocessing</strong>, <strong>search</strong>, and <strong>post-processing</strong> (smoothing) in one pipeline.</p>
+
+<div class="figure-wrap">
+  <div class="fig-label">Figure 1 — End-to-end pipeline (ROS node context)</div>
+  <svg width="820" height="440" viewBox="0 0 820 440" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="ar" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 9 3, 0 6" fill="#4a5568"/></marker>
+    </defs>
+    <rect x="10" y="10" width="800" height="420" rx="12" fill="#fafbfd" stroke="#cbd5e0"/>
+
+    <!-- Row 1 inputs -->
+    <rect x="30" y="30" width="150" height="52" rx="8" fill="#2c6fbb"/>
+    <text x="105" y="52" text-anchor="middle" fill="#fff" font-size="9" font-weight="700">/map</text>
+    <text x="105" y="66" text-anchor="middle" fill="#dbeafe" font-size="7">nav_msgs/OccupancyGrid</text>
+    <text x="105" y="76" text-anchor="middle" fill="#dbeafe" font-size="6.5">nav2_map_server</text>
+
+    <rect x="200" y="30" width="150" height="52" rx="8" fill="#2c6fbb"/>
+    <text x="275" y="52" text-anchor="middle" fill="#fff" font-size="9" font-weight="700">/odometry/map</text>
+    <text x="275" y="66" text-anchor="middle" fill="#dbeafe" font-size="7">Start pose → grid cell</text>
+
+    <rect x="370" y="30" width="150" height="52" rx="8" fill="#2c6fbb"/>
+    <text x="445" y="52" text-anchor="middle" fill="#fff" font-size="9" font-weight="700">/move_base_simple/goal</text>
+    <text x="445" y="66" text-anchor="middle" fill="#dbeafe" font-size="7">Goal pose → grid cell</text>
+
+    <rect x="540" y="30" width="260" height="52" rx="8" fill="#718096"/>
+    <text x="670" y="50" text-anchor="middle" fill="#fff" font-size="8" font-weight="700">Optional: pending goal queue</text>
+    <text x="670" y="64" text-anchor="middle" fill="#e2e8f0" font-size="6.5">If goal arrives before start is valid, retry via timer</text>
+
+    <!-- Preprocess -->
+    <rect x="30" y="100" width="360" height="70" rx="10" fill="#fff" stroke="#c05621" stroke-width="2"/>
+    <text x="210" y="122" text-anchor="middle" font-size="10" font-weight="700" fill="#0c1e33">Preprocess — create_inflated_map()</text>
+    <text x="210" y="138" text-anchor="middle" font-size="7.5" fill="#4a5568">Binary obstacle (occupancy ≥ 50) · scipy.ndimage.distance_transform_edt</text>
+    <text x="210" y="152" text-anchor="middle" font-size="7.5" fill="#4a5568">Mark cells within inflation_radius_m as high cost → safer clearance for G1 footprint</text>
+    <text x="210" y="166" text-anchor="middle" font-size="6.5" fill="#718096">Publish /inflated_map for RViz</text>
+
+    <!-- plan_path gate -->
+    <polygon points="400,200 480,235 400,270 320,235" fill="#fff9e6" stroke="#c9a227" stroke-width="2"/>
+    <text x="400" y="228" text-anchor="middle" font-size="9" font-weight="700" fill="#744210">is_valid(start)</text>
+    <text x="400" y="242" text-anchor="middle" font-size="9" font-weight="700" fill="#744210">AND is_valid(goal)?</text>
+
+    <text x="250" y="232" font-size="8" fill="#1e6f4e" font-weight="600">yes</text>
+    <line x1="320" y1="235" x2="200" y2="235" stroke="#1e6f4e" stroke-width="1.5" marker-end="url(#ar)"/>
+
+    <text x="520" y="228" font-size="8" fill="#c0392b" font-weight="600">no → log &amp; abort</text>
+    <line x1="480" y1="235" x2="580" y2="235" stroke="#c0392b" stroke-dasharray="4,3"/>
+
+    <!-- A* box -->
+    <rect x="30" y="290" width="380" height="115" rx="10" fill="#fff" stroke="#1e6f4e" stroke-width="2"/>
+    <text x="220" y="312" text-anchor="middle" font-size="11" font-weight="700" fill="#0c1e33">plan_path() — A* core loop</text>
+    <text x="220" y="328" text-anchor="middle" font-size="7.5" fill="#4a5568">open_set = min-heap on f · closed_set · came_from · g_score</text>
+    <text x="220" y="342" text-anchor="middle" font-size="7.5" fill="#4a5568">Pop min f → expand 8-neighbors (cost 1 or √2) → relax g → push heap</text>
+    <text x="220" y="356" text-anchor="middle" font-size="7.5" fill="#4a5568">Stop when current == goal → reconstruct path via came_from</text>
+    <text x="220" y="372" text-anchor="middle" font-size="7" fill="#718096" font-style="italic">heuristic(): Euclidean (+ optional heading / turn penalty for G1)</text>
+    <text x="220" y="388" text-anchor="middle" font-size="7" fill="#718096">If open_set empty → no path</text>
+
+    <!-- Post -->
+    <rect x="430" y="290" width="370" height="115" rx="10" fill="#fff" stroke="#2c6fbb" stroke-width="2"/>
+    <text x="615" y="312" text-anchor="middle" font-size="10" font-weight="700" fill="#0c1e33">Postprocess</text>
+    <text x="615" y="328" text-anchor="middle" font-size="7.5" fill="#4a5568">smooth_path_for_g1() — densify &amp; window smooth</text>
+    <text x="615" y="342" text-anchor="middle" font-size="7.5" fill="#4a5568">map_to_world() for each waypoint</text>
+    <text x="615" y="358" text-anchor="middle" font-size="7.5" fill="#4a5568">publish_path() → nav_msgs/Path</text>
+    <text x="615" y="376" text-anchor="middle" font-size="7" fill="#276749" font-family="JetBrains Mono, monospace">/astar_path (frame_id = map)</text>
+
+    <line x1="210" y1="170" x2="210" y2="200" stroke="#4a5568" marker-end="url(#ar)"/>
+    <line x1="400" y1="270" x2="400" y2="285" stroke="#4a5568" marker-end="url(#ar)"/>
+    <line x1="410" y1="347" x2="425" y2="347" stroke="#4a5568" marker-end="url(#ar)"/>
+  </svg>
+  <p class="caption">Figure 1 — Global planner is a pipeline: inflate obstacles → validate endpoints → A* search → smooth → publish path.</p>
+</div>
+
+<h2>3. A* core loop — detailed flowchart (matches implementation)</h2>
+<div class="figure-wrap">
+  <div class="fig-label">Figure 2 — A* search loop (single-source shortest path on grid)</div>
+  <svg width="780" height="560" viewBox="0 0 780 560" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="a2" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 9 3, 0 6" fill="#2d3748"/></marker>
+    </defs>
+
+    <ellipse cx="390" cy="38" rx="120" ry="26" fill="#e8f4fc" stroke="#2c6fbb" stroke-width="2"/>
+    <text x="390" y="36" text-anchor="middle" font-size="10" font-weight="700" fill="#0c1e33">START</text>
+    <text x="390" y="50" text-anchor="middle" font-size="7.5" fill="#4a5568">Initialize: g(start)=0, f(start)=h(start)</text>
+    <text x="390" y="62" text-anchor="middle" font-size="7.5" fill="#4a5568">open_set ← heap_push(f, start) · closed_set ← ∅</text>
+
+    <line x1="390" y1="64" x2="390" y2="88" stroke="#333" marker-end="url(#a2)"/>
+
+    <polygon points="390,90 500,130 390,170 280,130" fill="#fff9e6" stroke="#c9a227" stroke-width="1.8"/>
+    <text x="390" y="125" text-anchor="middle" font-size="9" font-weight="700" fill="#744210">open_set empty?</text>
+
+    <line x1="280" y1="130" x2="120" y2="130" stroke="#c0392b" stroke-width="1.5"/>
+    <text x="195" y="124" font-size="8" fill="#c0392b" font-weight="600">yes</text>
+    <rect x="30" y="105" width="90" height="50" rx="6" fill="#fdedec" stroke="#c0392b"/>
+    <text x="75" y="128" text-anchor="middle" font-size="8" font-weight="700">FAIL</text>
+    <text x="75" y="142" text-anchor="middle" font-size="6.5" fill="#722">No path</text>
+
+    <line x1="500" y1="130" x2="540" y2="130" stroke="#1e6f4e" stroke-width="1.5" marker-end="url(#a2)"/>
+    <text x="515" y="122" font-size="8" fill="#1e6f4e" font-weight="600">no</text>
+
+    <rect x="540" y="100" width="220" height="60" rx="8" fill="#fff" stroke="#2c5282" stroke-width="1.5"/>
+    <text x="650" y="120" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">Pop (f, x, y) = heapq.heappop(open_set)</text>
+    <text x="650" y="136" text-anchor="middle" font-size="7" fill="#4a5568">Lowest f in open set (ties broken by heap order)</text>
+    <text x="650" y="150" text-anchor="middle" font-size="6.5" fill="#718096">current ← (x, y)</text>
+
+    <line x1="650" y1="160" x2="650" y2="188" stroke="#333" marker-end="url(#a2)"/>
+
+    <polygon points="650,190 740,230 650,270 560,230" fill="#e8faf5" stroke="#1e6f4e" stroke-width="1.8"/>
+    <text x="650" y="225" text-anchor="middle" font-size="9" font-weight="700" fill="#14532d">current == goal?</text>
+
+    <text x="720" y="218" font-size="8" fill="#1e6f4e" font-weight="600">yes →</text>
+    <line x1="740" y1="230" x2="400" y2="230" stroke="#1e6f4e" stroke-width="1.2"/>
+    <line x1="400" y1="230" x2="400" y2="285" stroke="#1e6f4e" marker-end="url(#a2)"/>
+
+    <text x="575" y="218" font-size="8" fill="#744210">← no</text>
+    <rect x="300" y="288" width="200" height="62" rx="8" fill="#d4edda" stroke="#1e6f4e" stroke-width="2"/>
+    <text x="400" y="310" text-anchor="middle" font-size="9" font-weight="700" fill="#14532d">SUCCESS — Reconstruct path</text>
+    <text x="400" y="326" text-anchor="middle" font-size="7" fill="#276749">Trace came_from from goal → start, reverse</text>
+    <text x="400" y="340" text-anchor="middle" font-size="6.5" fill="#276749">→ smooth_path_for_g1() → publish</text>
+
+    <line x1="650" y1="270" x2="650" y2="300" stroke="#333" marker-end="url(#a2)"/>
+    <text x="665" y="292" font-size="8" fill="#744210">no</text>
+
+    <rect x="540" y="302" width="220" height="44" rx="8" fill="#f7fafc" stroke="#718096" stroke-width="1.3"/>
+    <text x="650" y="320" text-anchor="middle" font-size="8" font-weight="700" fill="#0c1e33">closed_set.add(current)</text>
+    <text x="650" y="334" text-anchor="middle" font-size="7" fill="#4a5568">Never re-expand this cell</text>
+
+    <line x1="650" y1="346" x2="650" y2="368" stroke="#333" marker-end="url(#a2)"/>
+
+    <rect x="480" y="370" width="340" height="95" rx="8" fill="#fff" stroke="#2c6fbb" stroke-width="1.5"/>
+    <text x="650" y="390" text-anchor="middle" font-size="9" font-weight="700" fill="#0c1e33">For each neighbor ∈ get_neighbors(x,y)</text>
+    <text x="650" y="406" text-anchor="middle" font-size="7" fill="#4a5568">8-connected: 4 axis (cost 1) + 4 diagonal (cost √2)</text>
+    <text x="650" y="420" text-anchor="middle" font-size="7" fill="#4a5568">Skip if neighbor ∈ closed_set</text>
+    <text x="650" y="434" text-anchor="middle" font-size="7" fill="#4a5568">tentative_g = g(current) + edge_cost</text>
+    <text x="650" y="448" text-anchor="middle" font-size="7" fill="#276749">If better g: update came_from, g_score, f_score, heap_push</text>
+
+    <line x1="650" y1="465" x2="390" y2="465" stroke="#4a5568"/>
+    <line x1="390" y1="465" x2="390" y2="170" stroke="#4a5568" marker-end="url(#a2)"/>
+    <text x="480" y="458" font-size="7.5" fill="#4a5568" font-style="italic">Loop back to “open_set empty?”</text>
+  </svg>
+  <p class="caption">Figure 2 — Standard A* loop: each iteration removes the most promising frontier cell, then relaxes all outgoing edges to neighbors.</p>
+</div>
+
+<h2>4. Step-by-step logical procedure</h2>
+
+<div class="step"><div class="step-num">0</div><div class="step-body"><h3>Precondition — grid model</h3>
+  <p>Convert the continuous world into a discrete grid: each cell has an occupancy value. Cells with value ≥ 50 are treated as obstacles. The <strong>inflated</strong> map widens no-go regions so the planned path keeps a safety margin from physical walls (robot radius + inflation radius in meters, converted to pixels).</p></div></div>
+
+<div class="step"><div class="step-num">1</div><div class="step-body"><h3>Define start and goal cells</h3>
+  <p>Map frame positions from <code>/odometry/map</code> (start) and <code>/move_base_simple/goal</code> (goal) are converted to integer indices <code>(start_x, start_y)</code>, <code>(goal_x, goal_y)</code> via <code>world_to_map()</code>. If either lies on an obstacle or outside the map, planning aborts early with diagnostics.</p></div></div>
+
+<div class="step"><div class="step-num">2</div><div class="step-body"><h3>Initialize search state</h3>
+  <p>
+    <code>g_score[(sx,sy)] = 0</code>,
+    <code>f_score[(sx,sy)] = h(sx,sy)</code>,
+    push <code>(f, sx, sy)</code> onto <code>open_set</code> (min-heap).
+    <code>closed_set = ∅</code>, <code>came_from = {}</code>.
+  </p></div></div>
+
+<div class="step"><div class="step-num">3</div><div class="step-body"><h3>Main loop — pop best frontier node</h3>
+  <p>While <code>open_set</code> is non-empty, pop the cell with <strong>minimum f</strong>. This is the “most promising” unexplored frontier because it minimizes estimated total cost <span class="eq">f = g + h</span>.</p></div></div>
+
+<div class="step"><div class="step-num">4</div><div class="step-body"><h3>Goal test</h3>
+  <p>If the popped cell equals <code>(goal_x, goal_y)</code>, reconstruct the path by following <code>came_from</code> pointers from goal back to start, reverse the list, then apply smoothing — <strong>done</strong>.</p></div></div>
+
+<div class="step"><div class="step-num">5</div><div class="step-body"><h3>Close current cell</h3>
+  <p>Add current to <code>closed_set</code>. Any path through a closed cell will not be reconsidered (standard A* with consistent heuristic).</p></div></div>
+
+<div class="step"><div class="step-num">6</div><div class="step-body"><h3>Expand neighbors</h3>
+  <p>For each valid neighbor from <code>get_neighbors()</code> (8 directions, step cost 1 or √2 in grid units): if neighbor is already closed, skip. Compute <code>tentative_g = g(current) + edge_cost</code>. If this improves the best known <code>g(neighbor)</code>, record <code>came_from[neighbor] = current</code>, update <code>g_score</code> and <code>f_score = g + h(neighbor)</code>, and push to the heap.</p></div></div>
+
+<div class="step"><div class="step-num">7</div><div class="step-body"><h3>Termination — failure</h3>
+  <p>If <code>open_set</code> empties without reaching the goal, no connected free path exists under the current inflation map (blocked corridor, goal inside wall, or excessive inflation).</p></div></div>
+
+<div class="step"><div class="step-num">8</div><div class="step-body"><h3>Post-processing</h3>
+  <p>Raw A* paths are jagged on an 8-connected grid. <code>smooth_path_for_g1()</code> reduces unnecessary zig-zags and adjusts point spacing for humanoid stepping; waypoints are converted back to world coordinates and published as <code>nav_msgs/Path</code> on <code>/astar_path</code>.</p></div></div>
+
+<h2>5. Design choices in this project (professional notes)</h2>
+<table>
+  <tr><th>Topic</th><th>Choice</th><th>Rationale</th></tr>
+  <tr>
+    <td>Open set structure</td>
+    <td><code>heapq</code> (binary min-heap)</td>
+    <td>O(log N) insert/extract; each cell may be pushed multiple times when a better g is found — correct and common in practice.</td>
+  </tr>
+  <tr>
+    <td>Neighbor connectivity</td>
+    <td>8-connected grid</td>
+    <td>Allows shorter paths than 4-connected; diagonal cost √2 preserves Euclidean interpretation of step length.</td>
+  </tr>
+  <tr>
+    <td>Heuristic</td>
+    <td>Euclidean distance + optional turn penalty</td>
+    <td>Biases search toward goals that are easier for a humanoid to approach; not strictly admissible if penalty is large — trade-off for motion feasibility.</td>
+  </tr>
+  <tr>
+    <td>Inflation</td>
+    <td>Distance transform (SciPy)</td>
+    <td>Same mathematical idea as Nav2 costmap inflation: approximate “keep away from obstacles” before graph search.</td>
+  </tr>
+</table>
+
+<h2>6. Interface summary</h2>
+<table>
+  <tr><th>Item</th><th>Value</th></tr>
+  <tr><td>Inputs</td><td><code>/map</code>, <code>/odometry/map</code>, <code>/move_base_simple/goal</code></td></tr>
+  <tr><td>Output</td><td><code>/astar_path</code> (<code>nav_msgs/Path</code>, <code>frame_id=map</code>)</td></tr>
+  <tr><td>Visualization</td><td><code>/inflated_map</code> (optional debugging)</td></tr>
+  <tr><td>Downstream</td><td>DWA local planner, position controllers</td></tr>
+</table>
+
+<footer>
+  Technical reference — A* global planner — <code>astar_planner_ros2.py</code><br>
+  For Manhattan-constrained global planning, see <code>astar_planner_ros2_Manhattan.py</code> (same A* family with different heuristic / path constraints).
+</footer>
+
+</body>
+</html>

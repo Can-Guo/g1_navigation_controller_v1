@@ -25,21 +25,18 @@ Migration Notes (ROS1 -> ROS2):
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from rclpy.duration import Duration
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 
 import numpy as np
 from nav_msgs.msg import OccupancyGrid, Path, Odometry
-from geometry_msgs.msg import PoseStamped, Point, PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseStamped
 from tf2_ros import Buffer, TransformListener
 #from tf_transformations import euler_from_quaternion
 import heapq
 import math
 from scipy import ndimage
-import os
-import time
-import csv
+from common_astar_utils import save_world_path_to_csv
 
 
 class AStarPlanner(Node):
@@ -61,8 +58,8 @@ class AStarPlanner(Node):
         self.map_origin_y = 0
         # A*改进: 调整安全边距参数 - 总距离从1.0m降至0.6m
         self.robot_radius = 0.35  # 机器人半径（米）- G1实际宽度+小量余量
-        self.inflation_radius_m = 0.25  # 膨胀半径（米）- 减小障碍物膨胀
-        
+        # self.inflation_radius_m = 0.25  # 膨胀半径（米）- 减小障碍物膨胀
+        self.inflation_radius_m = 0.15  # 膨胀半径（米）- 减小障碍物膨胀
         # ========================================================================
         # G1单轴移动机器人参数：每次只能沿一个坐标轴移动
         # 运动约束：
@@ -88,6 +85,7 @@ class AStarPlanner(Node):
         # ========================================================================
         self.pending_goal = None  # 缓存的目标点
         self.goal_received_time = None  # 目标点接收时间
+        self._map_received_once = False
         
         # 路径
         self.path = None
@@ -122,6 +120,13 @@ class AStarPlanner(Node):
             history=HistoryPolicy.KEEP_LAST,
             depth=10
         )
+        # 兼容性回退QoS：部分DDS/桥接环境下 TRANSIENT_LOCAL 可能兼容性不佳
+        map_qos_fallback = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.VOLATILE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1
+        )
         
         # ROS订阅和发布
         self.map_sub = self.create_subscription(
@@ -129,6 +134,13 @@ class AStarPlanner(Node):
             '/map', 
             self.map_callback, 
             map_qos,
+            callback_group=self.callback_group1
+        )
+        self.map_sub_fallback = self.create_subscription(
+            OccupancyGrid,
+            '/map',
+            self.map_callback,
+            map_qos_fallback,
             callback_group=self.callback_group1
         )
         
@@ -196,21 +208,27 @@ class AStarPlanner(Node):
         
     def map_callback(self, data):
         """接收地图数据"""
-        self.map_data = np.array(data.data).reshape((data.info.height, data.info.width))
-        self.map_width = data.info.width
-        self.map_height = data.info.height
-        self.map_resolution = data.info.resolution
-        self.map_origin_x = data.info.origin.position.x
-        self.map_origin_y = data.info.origin.position.y
-        
-        # 地图加载成功提示
-        self.get_logger().info(
-            f"✓ 地图数据已加载: {self.map_width}x{self.map_height} "
-            f"分辨率={self.map_resolution:.3f}m/cell"
-        )
-        
-        # 创建膨胀地图
-        self.create_inflated_map(data)
+        try:
+            self.map_data = np.array(data.data).reshape((data.info.height, data.info.width))
+            self.map_width = data.info.width
+            self.map_height = data.info.height
+            self.map_resolution = data.info.resolution
+            self.map_origin_x = data.info.origin.position.x
+            self.map_origin_y = data.info.origin.position.y
+
+            if not self._map_received_once:
+                self.get_logger().info(
+                    f"✓ 地图数据已加载: {self.map_width}x{self.map_height} "
+                    f"分辨率={self.map_resolution:.3f}m/cell"
+                )
+                self._map_received_once = True
+            else:
+                self.get_logger().debug("地图更新已接收", throttle_duration_sec=5.0)
+
+            # 创建膨胀地图
+            self.create_inflated_map(data)
+        except Exception as e:
+            self.get_logger().error(f"处理/map消息失败: {e}")
     
     def odom_callback(self, data):
         """从融合定位获取机器人当前位置作为起点"""
@@ -221,7 +239,7 @@ class AStarPlanner(Node):
         self.update_current_heading()
         
         if self.map_data is None:
-            self.get_logger().warn("尚未接收到地图数据，无法设置起始位置", throttle_duration_sec=1.0)
+            self.get_logger().warn("尚未接收到地图数据，无法设置起始位置", throttle_duration_sec=5.0)
             return
             
         try:
@@ -341,7 +359,7 @@ class AStarPlanner(Node):
     def goal_callback(self, data):
         """接收目标点"""
         if self.map_data is None:
-            self.get_logger().warn("尚未接收到地图数据，无法规划路径")
+            self.get_logger().warn("尚未接收到地图数据，无法规划路径", throttle_duration_sec=5.0)
             return
         
         self.get_logger().info(f'收到目标点: ({data.pose.position.x:.2f}, {data.pose.position.y:.2f})')
@@ -443,15 +461,10 @@ class AStarPlanner(Node):
         except Exception as e:
             self.get_logger().warn(f"无法更新朝向: {e}")
     
-    def heuristic_original(self, x, y):
-        """原始启发式函数：使用欧几里得距离（保留作为对比）"""
-        goal_x, goal_y = self.goal_x, self.goal_y
-        return math.sqrt((x - goal_x) ** 2 + (y - goal_y) ** 2)
-    
     def plan_path(self):
         """使用A*算法规划路径"""
         if self.map_data is None:
-            self.get_logger().warn("尚未接收到地图数据，无法规划路径")
+            self.get_logger().warn("尚未接收到地图数据，无法规划路径", throttle_duration_sec=5.0)
             return
         
         # ====================================================================
@@ -823,31 +836,8 @@ class AStarPlanner(Node):
     def save_path_to_file(self, world_path):
         """将路径保存到CSV文件"""
         try:
-            # 获取包的路径 - ROS2使用ament_index_python
-            from ament_index_python.packages import get_package_share_directory
-            package_path = get_package_share_directory('g1_nav')
-            
-            # 创建path文件夹（如果不存在）
-            path_dir = os.path.join(package_path, 'path')
-            if not os.path.exists(path_dir):
-                os.makedirs(path_dir)
-            
-            # 使用时间戳创建唯一文件名
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            filename = os.path.join(path_dir, f'path_{timestamp}.csv')
-            
-            # 保存到CSV文件
-            with open(filename, 'w', newline='') as csvfile:
-                # 创建CSV写入器
-                writer = csv.writer(csvfile)
-                
-                # 写入标题行
-                writer.writerow(['x', 'y'])
-                
-                # 写入所有路径点
-                for point in world_path:
-                    writer.writerow([point['x'], point['y']])
-            
+            # 公共工具函数统一维护路径CSV落盘逻辑，避免双版本脚本重复实现。
+            filename = save_world_path_to_csv(world_path)
             self.get_logger().info(f"路径已保存到CSV文件: {filename}")
         except Exception as e:
             self.get_logger().error(f"保存路径到文件时出错: {e}")
