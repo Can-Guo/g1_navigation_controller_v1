@@ -54,11 +54,11 @@ PointToPoint Navigation Action Server - G1 Unitree Robot
         用途: 触发全局路径规划
 
 服务提供:
-    - ~/point_to_point (robot_interfaces/PointToPoint.action)
+    - ~/point_to_point (g1_nav/PointToPoint.action)
         Action 服务器主接口
 
 安全机制:
-    1. 实时定位分级监控 (绿/黄/红三段阈值)
+    1. 实时定位监控 (置信度阈值: 0.3)
     2. 卡住检测 (5秒内移动 < 0.1m)
     3. 超时保护 (动态计算,最大 300 秒)
     4. 紧急停止响应时间 < 100ms
@@ -92,7 +92,7 @@ from std_msgs.msg import Bool, Float32
 from sensor_msgs_py import point_cloud2
 
 # 自定义 Action 接口
-# from navigation_controller.action import PointToPoint
+# from g1_nav.action import PointToPoint
 from robot_interfaces.action import PointToPoint
 
 class PointToPointActionServer(Node):
@@ -116,17 +116,7 @@ class PointToPointActionServer(Node):
         # 参数声明与配置
         # ====================================================================
         self.declare_parameter('goal_tolerance', 0.20)  # 目标到达阈值 [m] # 0.3->0.20, York, 20260203
-        # =========================================================================
-        # 定位置信度三段阈值（可配置）
-        # 绿色: confidence >= green_threshold
-        # 黄色: red_threshold <= confidence < green_threshold
-        # 红色: confidence < red_threshold
-        # =========================================================================
-        self.declare_parameter('localization_confidence_green_threshold', 0.45)
-        self.declare_parameter('localization_confidence_red_threshold', 0.35)
-        self.declare_parameter('localization_red_hold_timeout', 5.0)
-        # 兼容旧参数
-        self.declare_parameter('localization_confidence_threshold', 0.30)
+        self.declare_parameter('localization_confidence_threshold', 0.20)  # 定位置信度阈值
         self.declare_parameter('stuck_timeout', 5.0)  # 卡住检测时间 [s]
         self.declare_parameter('stuck_distance_threshold', 0.1)  # 卡住距离阈值 [m]
         self.declare_parameter('base_timeout', 45.0)  # 基础超时时间 [s]
@@ -139,15 +129,7 @@ class PointToPointActionServer(Node):
         
         # 读取参数
         self.goal_tolerance = self.get_parameter('goal_tolerance').value
-        self.localization_confidence_green_threshold = self.get_parameter(
-            'localization_confidence_green_threshold').value
-        self.localization_confidence_red_threshold = self.get_parameter(
-            'localization_confidence_red_threshold').value
-        self.localization_red_hold_timeout = self.get_parameter(
-            'localization_red_hold_timeout').value
-        legacy_single_threshold = self.get_parameter('localization_confidence_threshold').value
-        if legacy_single_threshold > self.localization_confidence_red_threshold:
-            self.localization_confidence_red_threshold = legacy_single_threshold
+        self.localization_confidence_threshold = self.get_parameter('localization_confidence_threshold').value
         self.stuck_timeout = self.get_parameter('stuck_timeout').value
         self.stuck_distance_threshold = self.get_parameter('stuck_distance_threshold').value
         self.base_timeout = self.get_parameter('base_timeout').value
@@ -193,8 +175,6 @@ class PointToPointActionServer(Node):
         # 警告限流
         self.last_confidence_warning_time = 0.0
         self.confidence_warning_interval = 2.0  # 每 2 秒最多警告一次
-        self.last_confidence_error_time = 0.0
-        self.confidence_error_interval = 1.0
         
         # ====================================================================
         # QoS 配置
@@ -277,13 +257,7 @@ class PointToPointActionServer(Node):
         self.get_logger().info('PointToPoint Action Server Initialized')
         self.get_logger().info('='*80)
         self.get_logger().info(f'Goal Tolerance: {self.goal_tolerance} m')
-        self.get_logger().info(
-            f'Localization Confidence Levels: '
-            f'GREEN >= {self.localization_confidence_green_threshold:.2f}, '
-            f'YELLOW >= {self.localization_confidence_red_threshold:.2f} and < {self.localization_confidence_green_threshold:.2f}, '
-            f'RED < {self.localization_confidence_red_threshold:.2f}'
-        )
-        self.get_logger().info(f'Red Hold Timeout: {self.localization_red_hold_timeout:.1f} s')
+        self.get_logger().info(f'Localization Confidence Threshold: {self.localization_confidence_threshold}')
         self.get_logger().info(f'Feedback Rate: {self.feedback_rate} Hz')
         self.get_logger().info(f'Emergency Stop Topic: /emergency_stop')
         self.get_logger().info('='*80)
@@ -469,12 +443,12 @@ class PointToPointActionServer(Node):
                 self.get_logger().error(f'任务超时 ({elapsed_time:.1f}s > {self.task_timeout:.1f}s)')
                 return result
             
-            # 检查定位丢失（红色级）
-            if self.localization_confidence < self.localization_confidence_red_threshold:
+            # 检查定位丢失
+            if self.localization_confidence < self.localization_confidence_threshold:
                 # 允许短暂丢失 (5 秒缓冲)
                 if not hasattr(self, 'low_confidence_start_time'):
                     self.low_confidence_start_time = time.time()
-                elif time.time() - self.low_confidence_start_time > self.localization_red_hold_timeout:
+                elif time.time() - self.low_confidence_start_time > 5.0:
                     goal_handle.abort()
                     result.result = "failed"
                     result.status_code = PointToPoint.Result.STATUS_LOCALIZATION_LOST
@@ -484,8 +458,8 @@ class PointToPointActionServer(Node):
                         self.current_goal.pose.position
                     )
                     self.get_logger().error(
-                        f'定位丢失(红色持续超时): 置信度 = {self.localization_confidence:.2f} '
-                        f'< RED阈值 {self.localization_confidence_red_threshold:.2f}'
+                        f'定位丢失: 置信度 = {self.localization_confidence:.2f} '
+                        f'< {self.localization_confidence_threshold:.2f}'
                     )
                     return result
             else:
@@ -679,26 +653,15 @@ class PointToPointActionServer(Node):
         """更新定位置信度"""
         with self.state_lock:
             self.localization_confidence = msg.data
-
-            current_time = time.time()
-            if msg.data >= self.localization_confidence_green_threshold:
-                return
-
-            if msg.data >= self.localization_confidence_red_threshold:
+            
+            # 限流警告: 每 2 秒最多警告一次
+            if msg.data < self.localization_confidence_threshold:
+                current_time = time.time()
                 if current_time - self.last_confidence_warning_time > self.confidence_warning_interval:
                     self.get_logger().warn(
-                        f'[YELLOW] 定位置信度警告: {msg.data:.2f} '
-                        f'(建议 >= {self.localization_confidence_green_threshold:.2f})'
+                        f'定位置信度低: {msg.data:.2f} < {self.localization_confidence_threshold:.2f}'
                     )
                     self.last_confidence_warning_time = current_time
-                return
-
-            if current_time - self.last_confidence_error_time > self.confidence_error_interval:
-                self.get_logger().error(
-                    f'[RED] 定位置信度危险: {msg.data:.2f} < {self.localization_confidence_red_threshold:.2f}. '
-                    f'建议立即停止机器人或取消当前任务，避免碰撞风险。'
-                )
-                self.last_confidence_error_time = current_time
     
     def emergency_stop_callback(self, msg):
         """处理紧急停止信号"""

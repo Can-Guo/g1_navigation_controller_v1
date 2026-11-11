@@ -32,7 +32,9 @@ PointToPoint Navigation - 键盘控制版本
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
+import sys
 import yaml
 import threading
 from pathlib import Path
@@ -415,7 +417,7 @@ def main(args=None):
     
     # 查找waypoints.yaml文件
     config_paths = [
-        Path('/home/sunny/sunny/hr_ros2_ws/src/config/waypoints.yaml'),
+        Path('/home/sunny/sunny/hr_ros2_ws/src/config/waypoints_copy.yaml'),
         Path('src/config/waypoints.yaml'),
         Path('src/navigation_controller/config/waypoints.yaml'),
         Path.cwd() / 'src/config/waypoints.yaml'

@@ -52,16 +52,15 @@ link_directories(
 # Additional nodes are installed as executable scripts for backward compatibility
 install(PROGRAMS
   scripts/astar_planner_ros2.py
-  scripts/astar_planner_ros2_Manhattan.py
+  scripts/astar_planner_ros2_Manhattan.py 
   scripts/dwa_planner_ros2_mid360.py
   scripts/g1_position_control_ros2.py
-  scripts/g1_position_control_ros2_manhattan.py
   scripts/point_to_point_action_server.py
   # scripts/test_point_to_point_action.py
   scripts/test_point_to_point_action_keyboard.py
   # scripts/nav_goal_pub_key_demo2.py
   scripts/pcd2pgm.py
-  scripts/simulation_odometry_publisher.py
+  # scripts/simulation_odometry_publisher.py
   # scripts/demo_multi_point_patrol.py  # 文件缺失
   # scripts/localization_monitor.py  # 文件缺失
   # scripts/monitor_ekf_fusion.py  # 文件缺失

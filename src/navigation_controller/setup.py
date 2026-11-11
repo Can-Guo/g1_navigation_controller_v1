@@ -27,7 +27,7 @@ setup(
     entry_points={
         'console_scripts': [
             # Core navigation nodes (ROS2)
-            'astar_planner = navigation_controller.nodes.astar_planner_ros2:main',
+            'astar_planner = navigation_controller.nodes.astar_planner_ros2_Manhattan:main',
             'dwa_planner = navigation_controller.nodes.dwa_planner_ros2_mid360:main',
             'g1_position_control = navigation_controller.nodes.g1_position_control_ros2:main',
             'point_to_point_action_server = navigation_controller.nodes.point_to_point_action_server:main',
@@ -44,9 +44,9 @@ setup(
             # 'tf_tree_monitor = navigation_controller.nodes.tf_tree_monitor:main',
             
             # Legacy ROS1 nodes (for reference/migration)
-            'astar_planner_ros1 = navigation_controller.nodes.astar_planner:main',
-            'g1_position_control_ros1 = navigation_controller.nodes.g1_position_control:main',
-            'dwa_planner_ros1 = navigation_controller.nodes.dwa_planner_ros1_mid360:main',
+            # 'astar_planner_ros1 = navigation_controller.nodes.astar_planner:main',
+            # 'g1_position_control_ros1 = navigation_controller.nodes.g1_position_control:main',
+            # 'dwa_planner_ros1 = navigation_controller.nodes.dwa_planner_ros1_mid360:main',
             
             # Utility tools
             'pcd2pgm = navigation_controller.nodes.pcd2pgm:main',

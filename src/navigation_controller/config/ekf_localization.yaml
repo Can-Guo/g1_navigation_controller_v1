@@ -1,13 +1,11 @@
 ### ekf_localization_improved.yaml
-### 🔧 改进版 EKF 配置 - 针对 G1 + LiDAR/IMU 融合
-###
+### 🔧 改进版EKF配置 - 针对低频定位优化
+### 
 ### 改进点：
-### 1. 提高 EKF 频率到 50Hz，在定位更新之间进行位姿预测
-### 2. 启用 predict_to_current_time，减少 TF 延迟
-### 3. 优化传感器融合权重，适应 2–4Hz 的 LiDAR 定位
+### 1. 提高EKF频率到50Hz，在定位更新之间进行位姿预测
+### 2. 启用时间预测功能，减少TF延迟
+### 3. 优化传感器融合权重，适应2-4Hz的LiDAR定位
 ### 4. 增加历史数据长度，提高平滑性
-### 5. 【专业】IMU 仅融合角速度 (vroll,vpitch,vyaw)，不融合绝对姿态 (roll,pitch,yaw)，
-###    避免无磁力计/视觉时姿态漂移拖累航向；绝对航向由 LiDAR 提供，角速度由 IMU 提供
 
 ekf_localization_node:
   ros__parameters:
@@ -53,40 +51,30 @@ ekf_localization_node:
       0.0,  0.0,  1e9,  0.0,  0.0,  0.0,     # z: 忽略
       0.0,  0.0,  0.0,  1e9,  0.0,  0.0,     # roll: 忽略
       0.0,  0.0,  0.0,  0.0,  1e9,  0.0,     # pitch: 忽略
-      0.0,  0.0,  0.0,  0.0,  0.0,  0.40     # yaw: ⬆️ 降低对LiDAR绝对航向的信任（旋转时更依赖IMU角速度稳定姿态）
+      0.0,  0.0,  0.0,  0.0,  0.0,  0.15     # yaw: 0.15 rad² (~22度)
     ]
     
-    # ========== 输入源2: IMU (Livox MID360, ~100 Hz) ==========
-    # 专业做法：只融合角速度，不融合绝对姿态
-    #
-    # 原因简述：
-    # - IMU 的 roll/pitch/yaw（来自消息中的 orientation 或驱动内部积分）在无磁力计/视觉
-    #   校正时会漂移，融合进 EKF 会拖累整体航向估计，转弯时尤其容易和 LiDAR yaw 冲突。
-    # - 角速度 (vroll, vpitch, vyaw) 是陀螺仪直接输出，短时积分非常稳定，适合在两次
-    #   LiDAR 更新之间做姿态预测，与 deskew 使用的也是同一类信息。
-    #
-    # 因此：关闭 IMU 姿态融合，仅用 IMU 角速度 + LiDAR 的 (x, y, yaw) 做融合。
-    # 姿态的“绝对基准”由 LiDAR 提供，角速度由 IMU 提供，兼顾稳定与无漂。
+    # 输入源2: IMU (来自 Livox MID360, 100 Hz)
     imu0: /livox/imu
     imu0_config: [
-      false, false, false,  # x, y, z - 忽略（位置只信 LiDAR）
-      false, false, false, # roll, pitch, yaw - 关闭：不融合 IMU 绝对姿态，避免漂移
-      false, false, false, # vx, vy, vz - 忽略
-      true,  true,  true,   # vroll, vpitch, vyaw - 仅融合角速度（短时稳定）
-      true,  true,  false   # ax, ay, az - 线加速度可选，2D 下 az 常关
+      false, false, false,  # x, y, z - 忽略位置
+      true,  true,  true,   # roll, pitch, yaw - 使用姿态
+      false, false, false,  # vx, vy, vz
+      true,  true,  true,   # vroll, vpitch, vyaw - 使用角速度 (高频!)
+      true,  true,  false   # ax, ay, az - 使用线加速度
     ]
     imu0_differential: false
     imu0_relative: false
-    imu0_queue_size: 50
+    imu0_queue_size: 50  # ⬆️ 增加队列以缓冲高频数据
     imu0_remove_gravitational_acceleration: true
     
-    # 角速度观测协方差：小 = 高信任度，EKF 会更多用陀螺仪做姿态预测
+    # 🔧 优化：提高IMU角速度的权重
+    # 在LiDAR定位间隔期间，主要依靠IMU维持姿态估计
     imu0_angular_velocity_covariance: [
-      0.001, 0.0,   0.0,    # vroll
-      0.0,   0.001, 0.0,    # vpitch
-      0.0,   0.0,   0.001   # vyaw（转弯时最关键）
+      0.001, 0.0,   0.0,    # vroll: 高精度
+      0.0,   0.001, 0.0,    # vpitch: 高精度
+      0.0,   0.0,   0.001   # vyaw: 高精度 (关键)
     ]
-    # 不融合 orientation 时，无需设置 imu0_pose_covariance；若存在则会被忽略
     
     # ========== 过程噪声协方差 (优化) ==========
     # 🔧 降低过程噪声，让系统更信任运动模型预测
@@ -149,18 +137,18 @@ ekf_localization_node:
 # ============================================================================
 #
 # 1. 备份原配置：
-#    cp src/navigation_controller/config/ekf_localization.yaml \
-#       src/navigation_controller/config/ekf_localization.yaml.bak
+#    cp src/g1_nav/config/ekf_localization.yaml \
+#       src/g1_nav/config/ekf_localization.yaml.bak
 #
 # 2. 应用此配置：
-#    cp src/navigation_controller/config/ekf_localization_improved.yaml \
-#       src/navigation_controller/config/ekf_localization.yaml
+#    cp src/g1_nav/config/ekf_localization_improved.yaml \
+#       src/g1_nav/config/ekf_localization.yaml
 #
 # 3. 重新编译：
-#    colcon build --packages-select navigation_controller
+#    colcon build --packages-select g1_nav
 #
 # 4. 重启launch：
-#    ros2 launch navigation_controller fusion_ros2.launch.py
+#    ros2 launch g1_nav fusion_ros2.launch.py
 #
 # 5. 监控效果：
 #    # 终端1：查看EKF诊断

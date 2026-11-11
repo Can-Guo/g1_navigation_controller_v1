@@ -18,7 +18,7 @@
 # Network interface for Unitree SDK DDS communication
 # Common values: ens37 (VM), eth0 (standard), enp109s0 (PCI), wlan0 (WiFi - not recommended)
 # network_interface: 'enx6c1ff723d793'
-network_interface: 'ens33'
+network_interface: 'enxf8e43b761f52'
 
 # Hardware Mode
 # ------------------------------------------------------------------------------
@@ -26,14 +26,6 @@ network_interface: 'ens33'
 # - true: Direct G1 robot control via Unitree SDK (requires unitree_sdk2py)
 # - false: Simulation mode (publishes /cmd_vel only)
 use_hardware: false  # 🤖 硬件模式
-
-# RViz Direct Goal Mode (Safety Critical)
-# ------------------------------------------------------------------------------
-# 是否允许在没有 Action Server 激活信号 (/navigation_active) 时，
-# 仅通过 RViz 的 2D Goal 直接驱动机器人移动。
-# - false: 安全默认。必须由 Action Server 激活后才允许移动
-# - true:  允许 RViz 直驱（调试方便，但安全门控更弱）
-allow_rviz_goal_without_action: true
 
 # ==============================================================================
 # Map Configuration

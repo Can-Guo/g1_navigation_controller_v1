@@ -181,7 +181,7 @@ Visualization Manager:
         Value: /odometry/filtered
       Value: true
 
-    - Alpha: 1.0
+    - Alpha: 1.0/home/york/ros2_ws_nav/install/g1_nav/lib/g1_nav/dwa_planner_ros2_mid360.py
       Buffer Length: 1
       Class: rviz_default_plugins/Path
       Color: 25; 255; 0

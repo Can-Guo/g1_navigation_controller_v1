@@ -10,5 +10,12 @@ __pycache__/
 *Backup*/
 Backup_map/
 *.pcd
+*.pgm
+
+# 地图体积大，且为现场私密扫描。map 目录只保留说明文本。
+# 读者需自行把 PCD / PGM / YAML 放进 map/，见该目录中的说明文件。
+**/map/**
+!**/map/
+!**/map/地图文件说明.txt
 
 

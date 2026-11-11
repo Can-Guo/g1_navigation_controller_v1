@@ -1,16 +1,10 @@
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 import launch
 
 ################### user configure parameters for ros2 start ###################
-# Default switched to CustomMsg (1):
-# - enables per-point offset_time for true deskew in mid360_locate
-# - can still be overridden from parent launch via xfer_format launch arg
 xfer_format   = 1    # 0-Pointcloud2(PointXYZRTL), 1-customized pointcloud format
 multi_topic   = 0    # 0-All LiDARs share the same topic, 1-One LiDAR one topic
 data_src      = 0    # 0-lidar, others-Invalid data src
@@ -26,7 +20,7 @@ user_config_path = os.path.join(cur_config_path, 'MID360_config.json')
 ################### user configure parameters for ros2 end #####################
 
 livox_ros2_params = [
-    {"xfer_format": ParameterValue(LaunchConfiguration('xfer_format'), value_type=int)},
+    {"xfer_format": xfer_format},
     {"multi_topic": multi_topic},
     {"data_src": data_src},
     {"publish_freq": publish_freq},
@@ -39,12 +33,6 @@ livox_ros2_params = [
 
 
 def generate_launch_description():
-    xfer_format_arg = DeclareLaunchArgument(
-        'xfer_format',
-        default_value=str(xfer_format),
-        description='Livox output format: 0=PointCloud2, 1=CustomMsg'
-    )
-
     livox_driver = Node(
         package='livox_ros_driver2',
         executable='livox_ros_driver2_node',
@@ -54,7 +42,6 @@ def generate_launch_description():
         )
 
     return LaunchDescription([
-        xfer_format_arg,
         livox_driver,
         # launch.actions.RegisterEventHandler(
         #     event_handler=launch.event_handlers.OnProcessExit(

@@ -1,6 +1,4 @@
 #include "locate_node.h"
-#include <cstdlib>
-#include <limits>
 
 // 全局变量定义
 bool inited = false;
@@ -13,264 +11,10 @@ rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr points_pub;
 rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub;
 rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub;
 rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr confidence_pub;  // 新增：置信度发布者
-rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr localization_ready_pub;
 rclcpp::Time t_msg = rclcpp::Time(0);
 bool received_initial_pose = false;
 std::shared_ptr<rclcpp::Node> g_node;
 std::vector<RegistrationQuality> quality_history;  // 新增：配准质量历史
-
-// ============================================================================
-// ROS parameters (defaults can be overridden via launch)
-// ============================================================================
-bool g_enable_deskew = true;
-std::string g_imu_topic = "/livox/imu";
-double g_imu_buffer_sec = 5.0;
-int64_t g_imu_time_offset_ns = 0;
-int g_deskew_reference_mode = 0;  // 0=start, 1=mid, 2=end
-int g_scan_sample_target_max = 2500;
-int g_min_scan_points_for_registration = 800;
-int g_scan_status_log_interval_ms = 3000;
-
-// 默认置信度阈值上调到 0.30：
-// 现场经验表明 0.20~0.25 容易放过低质量匹配，导致“看起来有定位但很不稳”。
-float g_confidence_threshold = 0.30f;
-float g_max_position_jump_m = 4.0f;
-float g_max_rotation_jump_rad = 2.0f;
-int g_reject_check_warmup_frames = 5;
-
-bool g_auto_initialize_pose = true;
-bool g_allow_runtime_relocalization = true;
-double g_auto_init_x = 0.0;
-double g_auto_init_y = 0.0;
-double g_auto_init_z = 1.3;
-double g_auto_init_yaw = 0.0;
-int g_localization_ready_streak_needed = 3;
-bool g_localization_ready = false;
-int g_confident_streak = 0;
-
-// ============================================================================
-// IMU buffer + helper functions for rotation-only deskew
-// ============================================================================
-namespace {
-struct ImuSample {
-  rclcpp::Time stamp;
-  Eigen::Vector3d gyro_rad_s;  // angular velocity (rad/s)
-};
-
-std::mutex g_imu_mutex;
-std::deque<ImuSample> g_imu_buffer;
-
-inline double toSec(const rclcpp::Time& t) {
-  return static_cast<double>(t.nanoseconds()) * 1e-9;
-}
-
-void trimImuBufferLocked(const rclcpp::Time& newest_stamp) {
-  const int64_t keep_ns = static_cast<int64_t>(g_imu_buffer_sec * 1e9);
-  const int64_t min_ns = newest_stamp.nanoseconds() - keep_ns;
-  while (!g_imu_buffer.empty() && g_imu_buffer.front().stamp.nanoseconds() < min_ns) {
-    g_imu_buffer.pop_front();
-  }
-}
-
-bool buildGyroTrajectoryForScan(
-    const rclcpp::Time& scan_start,
-    const rclcpp::Time& scan_end,
-    std::vector<double>& imu_times,
-    std::vector<Eigen::Quaterniond>& imu_quats,
-    std::string& fail_reason) {
-  std::vector<ImuSample> imu;
-  {
-    std::lock_guard<std::mutex> lk(g_imu_mutex);
-    if (g_imu_buffer.size() < 2) {
-      fail_reason = "IMU buffer too small (<2 samples)";
-      return false;
-    }
-    // Copy relevant IMU samples to avoid holding the mutex while integrating.
-    // Keep a wider margin (150ms) to tolerate callback jitter and DDS burst behavior.
-    for (const auto& s : g_imu_buffer) {
-      const int64_t ns = s.stamp.nanoseconds();
-      if (ns >= scan_start.nanoseconds() - 150'000'000LL && ns <= scan_end.nanoseconds() + 150'000'000LL) {
-        imu.push_back(s);
-      }
-    }
-
-    // If strict window extraction fails, fall back to nearest boundary samples
-    // from the whole IMU buffer. This avoids frequent deskew OFF toggling when
-    // IMU callback timing is slightly delayed.
-    if (imu.size() < 2) {
-      const auto chooseNearestIndex = [](const std::deque<ImuSample>& buf, int64_t target_ns) -> size_t {
-        size_t best_idx = 0;
-        int64_t best_abs = std::numeric_limits<int64_t>::max();
-        for (size_t i = 0; i < buf.size(); ++i) {
-          const int64_t d = std::llabs(buf[i].stamp.nanoseconds() - target_ns);
-          if (d < best_abs) {
-            best_abs = d;
-            best_idx = i;
-          }
-        }
-        return best_idx;
-      };
-
-      const size_t idx_start = chooseNearestIndex(g_imu_buffer, scan_start.nanoseconds());
-      size_t idx_end = chooseNearestIndex(g_imu_buffer, scan_end.nanoseconds());
-      if (idx_end == idx_start) {
-        if (idx_end + 1 < g_imu_buffer.size()) {
-          idx_end += 1;
-        } else if (idx_end > 0) {
-          idx_end -= 1;
-        }
-      }
-
-      if (idx_start != idx_end) {
-        imu.push_back(g_imu_buffer[idx_start]);
-        imu.push_back(g_imu_buffer[idx_end]);
-      }
-    }
-  }
-
-  if (imu.size() < 2) {
-    fail_reason = "Not enough IMU samples covering scan time window";
-    return false;
-  }
-
-  std::sort(imu.begin(), imu.end(), [](const ImuSample& a, const ImuSample& b) {
-    return a.stamp.nanoseconds() < b.stamp.nanoseconds();
-  });
-
-  const double t0 = toSec(scan_start);
-  imu_times.clear();
-  imu_quats.clear();
-  imu_times.reserve(imu.size());
-  imu_quats.reserve(imu.size());
-
-  Eigen::Quaterniond q = Eigen::Quaterniond::Identity();
-  imu_times.push_back(std::max(0.0, toSec(imu.front().stamp) - t0));
-  imu_quats.push_back(q);
-
-  for (size_t i = 1; i < imu.size(); ++i) {
-    const double t_prev = toSec(imu[i - 1].stamp);
-    const double t_curr = toSec(imu[i].stamp);
-    double dt = t_curr - t_prev;
-    if (dt <= 0.0 || dt > 0.2) {
-      // Non-monotonic or too large dt: skip integration to keep stable.
-      dt = 0.0;
-    }
-
-    const Eigen::Vector3d w_prev = imu[i - 1].gyro_rad_s;
-    const Eigen::Vector3d w_curr = imu[i].gyro_rad_s;
-    const Eigen::Vector3d w_avg = 0.5 * (w_prev + w_curr);
-    const Eigen::Vector3d dtheta = w_avg * dt;
-
-    const double angle = dtheta.norm();
-    if (angle > 1e-12) {
-      const Eigen::Vector3d axis = dtheta / angle;
-      const Eigen::AngleAxisd aa(angle, axis);
-      q = (q * Eigen::Quaterniond(aa)).normalized();
-    }
-
-    imu_times.push_back(std::max(0.0, t_curr - t0));
-    imu_quats.push_back(q);
-  }
-
-  return imu_times.size() >= 2;
-}
-
-Eigen::Quaterniond interpolateQuat(
-    const std::vector<double>& imu_times,
-    const std::vector<Eigen::Quaterniond>& imu_quats,
-    double t,
-    size_t& idx) {
-  if (imu_times.empty()) {
-    return Eigen::Quaterniond::Identity();
-  }
-  if (t <= imu_times.front()) {
-    return imu_quats.front();
-  }
-  if (t >= imu_times.back()) {
-    return imu_quats.back();
-  }
-  while (idx + 1 < imu_times.size() && imu_times[idx + 1] < t) {
-    idx++;
-  }
-  const size_t i0 = idx;
-  const size_t i1 = std::min(idx + 1, imu_times.size() - 1);
-  const double t0 = imu_times[i0];
-  const double t1 = imu_times[i1];
-  const double alpha = (t1 > t0) ? (t - t0) / (t1 - t0) : 0.0;
-  return imu_quats[i0].slerp(alpha, imu_quats[i1]).normalized();
-}
-
-bool deskewLivoxCustomMsg(
-    const livox_ros_driver2::msg::CustomMsg::SharedPtr& msg,
-    pcl::PointCloud<pcl::PointXYZ>::Ptr& out_cloud,
-    std::string& fail_reason) {
-  if (!g_enable_deskew) {
-    fail_reason = "deskew disabled by parameter";
-    return false;
-  }
-  if (!msg || msg->point_num < 2) {
-    fail_reason = "empty scan";
-    return false;
-  }
-
-  const int64_t timebase_ns = static_cast<int64_t>(msg->timebase);
-  // msg->header.stamp is builtin_interfaces::msg::Time, convert it explicitly.
-  const rclcpp::Time scan_start = (timebase_ns > 0) ? rclcpp::Time(timebase_ns) : rclcpp::Time(msg->header.stamp);
-
-  uint32_t max_offset = 0;
-  for (uint32_t i = 0; i < msg->point_num; ++i) {
-    max_offset = std::max(max_offset, msg->points[i].offset_time);
-  }
-  const rclcpp::Time scan_end = scan_start + rclcpp::Duration::from_nanoseconds(static_cast<int64_t>(max_offset));
-
-  std::vector<double> imu_times;
-  std::vector<Eigen::Quaterniond> imu_quats;
-  const rclcpp::Time scan_start_imu = scan_start + rclcpp::Duration::from_nanoseconds(g_imu_time_offset_ns);
-  const rclcpp::Time scan_end_imu = scan_end + rclcpp::Duration::from_nanoseconds(g_imu_time_offset_ns);
-  if (!buildGyroTrajectoryForScan(scan_start_imu, scan_end_imu, imu_times, imu_quats, fail_reason)) {
-    return false;
-  }
-
-  const double scan_duration = std::max(1e-6, static_cast<double>(max_offset) * 1e-9);
-  double tref = 0.0;
-  if (g_deskew_reference_mode == 1) {
-    tref = 0.5 * scan_duration;
-  } else if (g_deskew_reference_mode == 2) {
-    tref = scan_duration;
-  }
-
-  size_t imu_idx_ref = 0;
-  const Eigen::Quaterniond q_ref = interpolateQuat(imu_times, imu_quats, tref, imu_idx_ref);
-
-  size_t imu_idx = 0;
-  out_cloud.reset(new pcl::PointCloud<pcl::PointXYZ>());
-  out_cloud->reserve(msg->point_num);
-
-  for (uint32_t i = 1; i < msg->point_num; i++) {
-    const auto& pt_i = msg->points.at(i);
-    const double distance2 = static_cast<double>(pt_i.x) * pt_i.x + static_cast<double>(pt_i.y) * pt_i.y;
-    if (distance2 < 0.25 || distance2 > 2500.0) {
-      continue;
-    }
-
-    // Keep the same axis convention as the original code path.
-    const Eigen::Vector3d p(pt_i.x, -pt_i.y, -pt_i.z);
-    const double ti = static_cast<double>(pt_i.offset_time) * 1e-9;  // assume ns
-    const Eigen::Quaterniond q_t = interpolateQuat(imu_times, imu_quats, ti, imu_idx);
-
-    // Rotation from reference time to point time:
-    //   q_ref_to_t = q_ref^{-1} * q_t
-    // Deskew point to reference frame:
-    //   p_ref = q_ref_to_t * p_t
-    const Eigen::Vector3d p_ref = (q_ref.conjugate() * q_t) * p;
-    out_cloud->emplace_back(static_cast<float>(p_ref.x()),
-                            static_cast<float>(p_ref.y()),
-                            static_cast<float>(p_ref.z()));
-  }
-
-  return !out_cloud->empty();
-}
-}  // namespace
 
 // ============================================================================
 // 配准质量评估函数实现
@@ -392,65 +136,26 @@ float computeAdaptiveLocalMapRadius(
     return radius;
 }
 
-namespace {
-void publishLocalizationReady(bool ready) {
-    g_localization_ready = ready;
-    if (localization_ready_pub) {
-        std_msgs::msg::Bool msg;
-        msg.data = ready;
-        localization_ready_pub->publish(msg);
-    }
-}
-
-void applyInitialPose(
-    double x, double y, double z, const Eigen::Quaternionf& q,
-    const char* source, bool force_reinitialize_registration) {
-    veh_pose = Eigen::Matrix4f::Identity();
-    veh_pose(0, 3) = static_cast<float>(x);
-    veh_pose(1, 3) = static_cast<float>(y);
-    veh_pose(2, 3) = static_cast<float>(z);
-    veh_pose.topLeftCorner(3, 3) = q.normalized().toRotationMatrix();
-
-    prev_veh_pose = veh_pose;
-    received_initial_pose = true;
-
-    // Re-initialize scan matching from this pose.
-    // This is important for runtime manual re-localization: we must switch back
-    // to robust NDT initialization path before returning to GICP tracking.
-    if (force_reinitialize_registration) {
-        inited = false;
-    }
-
-    quality_history.clear();
-    publishLocalizationReady(false);
-
-    RCLCPP_INFO(g_node->get_logger(),
-        "Initial pose set from %s: x=%.3f y=%.3f z=%.3f (registration reinit=%s)",
-        source, x, y, z, force_reinitialize_registration ? "true" : "false");
-}
-}  // namespace
-
 void initialPoseCallback(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg) {
-    // Startup: always accept the first pose.
-    // Runtime: accept new /initialpose only if enabled by parameter.
-    if (received_initial_pose && !g_allow_runtime_relocalization) {
-        return;
+    if (!received_initial_pose) {
+        // 从消息中提取位置
+        veh_pose(0, 3) = msg->pose.pose.position.x;
+        veh_pose(1, 3) = msg->pose.pose.position.y;
+        veh_pose(2, 3) = 1.3;
+
+        // 从消息中提取姿态（四元数）
+        Eigen::Quaterniond q;
+        tf2::fromMsg(msg->pose.pose.orientation, q);
+
+        // 将两个旋转组合起来
+        Eigen::Quaternionf q_final = q.cast<float>();
+
+        // 将四元数转换为旋转矩阵
+        veh_pose.topLeftCorner(3, 3) = q_final.toRotationMatrix();
+
+        received_initial_pose = true;
+        RCLCPP_INFO(g_node->get_logger(), "Received initial pose from RViz");
     }
-
-    Eigen::Quaterniond q_msg;
-    tf2::fromMsg(msg->pose.pose.orientation, q_msg);
-    const Eigen::Quaternionf q = q_msg.cast<float>();
-
-    // Keep z from configurable auto-init/default behavior. For many G1 setups
-    // map z for base_link is not 0; preserving configured z avoids sudden jumps.
-    const double z = g_auto_init_z;
-    applyInitialPose(
-        msg->pose.pose.position.x,
-        msg->pose.pose.position.y,
-        z,
-        q,
-        "RViz /initialpose",
-        true);
 }
  
 void pub_path(Eigen::Matrix4f &pose) {
@@ -533,19 +238,6 @@ void registration(pcl::PointCloud<pcl::PointXYZ>::Ptr &points, pcl::PointCloud<p
             conf_msg.data = quality.getConfidence();
             confidence_pub->publish(conf_msg);
         }
-
-        // 启动阶段 readiness 判定：连续高置信度后再标记“定位就绪”。
-        if (quality.getConfidence() >= g_confidence_threshold) {
-            g_confident_streak++;
-        } else {
-            g_confident_streak = 0;
-        }
-        if (!g_localization_ready && g_confident_streak >= g_localization_ready_streak_needed) {
-            publishLocalizationReady(true);
-            RCLCPP_INFO(g_node->get_logger(),
-                "Localization READY after NDT init: confidence=%.2f, streak=%d",
-                quality.getConfidence(), g_confident_streak);
-        }
         
     } else {
         // ====================================================================
@@ -576,10 +268,9 @@ void registration(pcl::PointCloud<pcl::PointXYZ>::Ptr &points, pcl::PointCloud<p
         // 行走时会有周期性晃动，需要更宽松的置信度阈值
         // 但同时要防止大幅度的位姿跳变
         // ====================================================================
-        // 阈值来自 ROS 参数（见 main_ros2.cpp），便于针对不同场景/速度调参。
-        const float CONFIDENCE_THRESHOLD = g_confidence_threshold;
-        const float MAX_POSITION_JUMP = g_max_position_jump_m;
-        const float MAX_ROTATION_JUMP = g_max_rotation_jump_rad;
+        const float CONFIDENCE_THRESHOLD = 0.15f;  // G1行走时适当降低阈值
+        const float MAX_POSITION_JUMP = 4.0f;      // 最大位置跳变4米
+        const float MAX_ROTATION_JUMP = 2.0f;      // 最大旋转跳变（弧度）
         
         // 计算位置变化
         Eigen::Vector3f pos_change = candidate_pose.block<3, 1>(0, 3) - prev_veh_pose.block<3, 1>(0, 3);
@@ -601,13 +292,13 @@ void registration(pcl::PointCloud<pcl::PointXYZ>::Ptr &points, pcl::PointCloud<p
         }
         
         // 判断2：位置跳变过大（除非是初次定位后）
-        if (static_cast<int>(quality_history.size()) > g_reject_check_warmup_frames && position_jump > MAX_POSITION_JUMP) {
+        if (quality_history.size() > 5 && position_jump > MAX_POSITION_JUMP) {
             accept_result = false;
             reject_reason = "位置跳变过大";
         }
         
         // 判断3：旋转跳变过大
-        if (static_cast<int>(quality_history.size()) > g_reject_check_warmup_frames && rotation_jump > MAX_ROTATION_JUMP) {
+        if (quality_history.size() > 5 && rotation_jump > MAX_ROTATION_JUMP) {
             accept_result = false;
             reject_reason = "旋转跳变过大";
         }
@@ -621,19 +312,6 @@ void registration(pcl::PointCloud<pcl::PointXYZ>::Ptr &points, pcl::PointCloud<p
                 "配准成功: 置信度=%.2f, 内点率=%.2f, 适应度=%.4f, 位移=%.2fm, 旋转=%.2frad",
                 confidence, quality.inlier_ratio, quality.fitness_score,
                 position_jump, rotation_jump);
-
-            // 连续高置信度记分，用于发布 localization_ready。
-            if (confidence >= g_confidence_threshold) {
-                g_confident_streak++;
-            } else {
-                g_confident_streak = 0;
-            }
-            if (!g_localization_ready && g_confident_streak >= g_localization_ready_streak_needed) {
-                publishLocalizationReady(true);
-                RCLCPP_INFO(g_node->get_logger(),
-                    "Localization READY: confidence=%.2f, streak=%d",
-                    confidence, g_confident_streak);
-            }
         } else {
             // 拒绝配准结果，保持上一次位姿
             // RCLCPP_WARN(g_node->get_logger(),
@@ -644,12 +322,6 @@ void registration(pcl::PointCloud<pcl::PointXYZ>::Ptr &points, pcl::PointCloud<p
             // 对于G1机器人，可以使用简单的运动模型预测
             // 这里暂时保持位姿不变，实际部署时可集成IMU数据
             candidate_pose = prev_veh_pose;
-
-            // 拒绝当前帧时，说明定位可信度下降，清空 streak 并置为 not-ready。
-            g_confident_streak = 0;
-            if (g_localization_ready) {
-                publishLocalizationReady(false);
-            }
         }
         
         // 保存质量历史（最多保留最近50次）
@@ -681,13 +353,6 @@ void registration(pcl::PointCloud<pcl::PointXYZ>::Ptr &points, pcl::PointCloud<p
 }
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr normalSpaceSampling(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud, int target_points) {
-    if (!cloud || cloud->empty()) {
-        return cloud;
-    }
-    if (cloud->size() <= 2) {
-        return cloud;
-    }
-
     // 计算法向量
     pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
     pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
@@ -708,10 +373,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr normalSpaceSampling(const pcl::PointCloud<pc
     nss.setInputCloud(cloud_with_normals);
     nss.setNormals(cloud_with_normals);
     nss.setBins(8, 8, 8);
-    // Keep sample count strictly smaller than input size to avoid repeated
-    // NormalSpaceSampling warnings under sparse/degenerate scans.
-    const int safe_target = std::max(1, std::min(target_points, static_cast<int>(cloud_with_normals->size()) - 1));
-    nss.setSample(safe_target);
+    nss.setSample(target_points);
     nss.filter(*sampled_cloud);
 
     // 转换回普通点云
@@ -724,20 +386,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr normalSpaceSampling(const pcl::PointCloud<pc
 void pointCloudProcess(pcl::PointCloud<pcl::PointXYZ>::Ptr &points_filtered) {
     auto start = std::chrono::high_resolution_clock::now();
 
-    if (!points_filtered || static_cast<int>(points_filtered->size()) < g_min_scan_points_for_registration) {
-        RCLCPP_WARN_THROTTLE(
-            g_node->get_logger(), *g_node->get_clock(), 3000,
-            "Skip sparse scan: points=%zu < min_scan_points_for_registration=%d",
-            points_filtered ? points_filtered->size() : 0, g_min_scan_points_for_registration);
-        return;
-    }
-
-    // 自适应采样数量：不超过实际点云大小，避免 NormalSpaceSampling 警告
-    // 当点云较少时直接全量使用，当点云较多时采样到配置上限以控制计算量
-    int sample_target = std::min(static_cast<int>(points_filtered->size()), g_scan_sample_target_max);
-    if (sample_target > 50) {  // 点数太少时跳过采样，直接用原始点云
-        points_filtered = normalSpaceSampling(points_filtered, sample_target);
-    }
+    points_filtered = normalSpaceSampling(points_filtered, 4000);
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr local_map(new pcl::PointCloud<pcl::PointXYZ>);
     auto center = pcl::PointXYZ(veh_pose(0, 3), veh_pose(1, 3), veh_pose(2, 3));
@@ -772,71 +421,27 @@ void pointCloudProcess(pcl::PointCloud<pcl::PointXYZ>::Ptr &points_filtered) {
 }
 
 void livox_callback(const livox_ros_driver2::msg::CustomMsg::SharedPtr msg) {
-    // =========================================================================
-    // Rotation-only deskew (IMU gyro + per-point offset_time)
-    //
-    // 实机问题背景（G1 大幅转向时常见）：
-    // - MID360 的一帧点云不是“瞬时”采样，而是一个时间扫掠；
-    // - 机器人转向时，同一帧内前后点的姿态不同，墙面会在点云里呈现扇形/弯曲；
-    // - 直接将畸变点云送入 GICP/NDT，会导致配准适应度变差、置信度下降，严重时发生跳变/丢定位。
-    //
-    // 这里的策略：
-    // - 若开启 deskew 且 IMU 数据充足：对每个点按采样时间做旋转补偿，把点云拉回同一参考时刻；
-    // - 若 deskew 失败：自动回退到原来的不补偿模式（保证系统可用，但转向稳定性会下降）。
-    // =========================================================================
-    pcl::PointCloud<pcl::PointXYZ>::Ptr points_filtered;
-    std::string deskew_fail_reason;
-    const bool deskew_ok = deskewLivoxCustomMsg(msg, points_filtered, deskew_fail_reason);
-
-    if (!deskew_ok) {
-        // Fallback: keep original behavior.
-        points_filtered.reset(new pcl::PointCloud<pcl::PointXYZ>);
-        points_filtered->reserve(msg->point_num);
-        for (uint32_t i = 1; i < msg->point_num; i++) {
-            const auto& pt_i = msg->points.at(i);
-            const double distance2 = static_cast<double>(pt_i.x) * pt_i.x + static_cast<double>(pt_i.y) * pt_i.y;
-            if (distance2 < 0.25 || distance2 > 2500.0) {
-                continue;
-            }
-            points_filtered->emplace_back(pt_i.x, -pt_i.y, -pt_i.z);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr points_filtered(new pcl::PointCloud<pcl::PointXYZ>);
+    for (uint i = 1; i < msg->point_num; i++) {
+        auto &pt_i = msg->points.at(i);
+        double distance2 = pt_i.x * pt_i.x + pt_i.y * pt_i.y;
+        
+        if (distance2 < 0.25 || distance2 > 2500.0) {
+            continue;
         }
-
-        RCLCPP_WARN_THROTTLE(
-            g_node->get_logger(), *g_node->get_clock(), 5000,
-            "Deskew disabled/failed (%s). Fallback to raw scan. Turning stability may degrade.",
-            deskew_fail_reason.c_str());
+        pcl::PointXYZ pt(pt_i.x, -pt_i.y, -pt_i.z);
+        points_filtered->emplace_back(pt);
     }
 
-    RCLCPP_INFO_THROTTLE(g_node->get_logger(), *g_node->get_clock(), g_scan_status_log_interval_ms,
-        "Livox scan: point_num=%u, used=%zu, deskew=%s",
-        msg->point_num, points_filtered->size(), deskew_ok ? "ON" : "OFF");
+    RCLCPP_INFO_THROTTLE(g_node->get_logger(), *g_node->get_clock(), 1000,
+        "Received Livox pointcloud: point_num=%u, filtered=%zu", 
+        msg->point_num, points_filtered->size());
 
     t_msg = msg->header.stamp;
     pointCloudProcess(points_filtered);
-}
-
-void imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg) {
-    if (!msg) {
-        return;
-    }
-
-    // Deskew uses gyro only:
-    // - Gyro integration is reliable for short-term rotation within a scan.
-    // - IMU absolute orientation may drift (no magnetometer), so we don't require it here.
-    ImuSample s;
-    s.stamp = msg->header.stamp;
-    s.gyro_rad_s = Eigen::Vector3d(
-        msg->angular_velocity.x,
-        msg->angular_velocity.y,
-        msg->angular_velocity.z);
-
-    std::lock_guard<std::mutex> lk(g_imu_mutex);
-    if (!g_imu_buffer.empty() && s.stamp.nanoseconds() <= g_imu_buffer.back().stamp.nanoseconds()) {
-        // Drop out-of-order IMU samples to keep integration stable.
-        return;
-    }
-    g_imu_buffer.push_back(s);
-    trimImuBufferLocked(s.stamp);
+    // RCLCPP_INFO_T(g_node->get_logger(), "Received Livox pointcloud, point_num=%u", msg->point_num);
+    // RCLCPP_INFO_THROTTLE(g_node->get_logger(), *g_node->get_clock(), 1000,
+    //     "Received Livox pointcloud: filtered=%zu", points_filtered->size());
 }
 
 void pcl_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
@@ -849,7 +454,7 @@ void pcl_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
         if (distance2 < distance2_min_thr || distance2 > distance2_local_map_thr) {
             continue;
         }
-        pcl::PointXYZ pt1(pt.x, -pt.y, -pt.z);
+        pcl::PointXYZ pt1(pt.x, -pt.y, -pt.z); 
         points_filtered->push_back(pt1);
     }
     t_msg = msg->header.stamp;

@@ -25,18 +25,21 @@ Migration Notes (ROS1 -> ROS2):
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.duration import Duration
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 
 import numpy as np
 from nav_msgs.msg import OccupancyGrid, Path, Odometry
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Point, PoseWithCovarianceStamped
 from tf2_ros import Buffer, TransformListener
 #from tf_transformations import euler_from_quaternion
 import heapq
 import math
 from scipy import ndimage
-from common_astar_utils import save_world_path_to_csv
+import os
+import time
+import csv
 
 
 class AStarPlanner(Node):
@@ -331,9 +334,6 @@ class AStarPlanner(Node):
             return
         
         self.get_logger().info(f'收到目标点: ({data.pose.position.x:.2f}, {data.pose.position.y:.2f})')
-        # 在进入新任务前先清空上一任务的可视化路径，避免 RViz 中残留旧轨迹干扰评审。
-        # 这里发布一个空 Path（同一 topic），RViz Path display 会立即刷新为“无历史路径”状态。
-        self.clear_astar_path_visualization()
             
         # 将世界坐标转换为地图坐标
         goal_x, goal_y = self.world_to_map(data.pose.position.x, data.pose.position.y)
@@ -357,21 +357,6 @@ class AStarPlanner(Node):
             # 缓存目标点
             self.pending_goal = data
             self.goal_received_time = self.get_clock().now()
-    
-    def clear_astar_path_visualization(self):
-        """
-        清空 A* 路径可视化。
-        
-        设计说明：
-        - ROS2 RViz2 的 Path Display 不支持“清除按钮”语义消息；
-        - 最稳妥方式是向同一 topic 发布空 Path，触发 display 立即覆盖旧数据；
-        - 对于“每次只看一个目标任务”的运维需求，建议在新 goal 到来时先清空，再重算新路径。
-        """
-        empty_path_msg = Path()
-        empty_path_msg.header.stamp = self.get_clock().now().to_msg()
-        empty_path_msg.header.frame_id = "map"
-        self.path_pub.publish(empty_path_msg)
-        self.get_logger().info("已清空上一任务的 A* 路径可视化")
     
     
     def world_to_map(self, world_x, world_y):
@@ -476,6 +461,11 @@ class AStarPlanner(Node):
             self.current_heading = yaw
         except Exception as e:
             self.get_logger().warn(f"无法更新朝向: {e}")
+    
+    def heuristic_original(self, x, y):
+        """原始启发式函数：使用欧几里得距离（保留作为对比）"""
+        goal_x, goal_y = self.goal_x, self.goal_y
+        return math.sqrt((x - goal_x) ** 2 + (y - goal_y) ** 2)
     
     def plan_path(self):
         """使用A*算法规划路径"""
@@ -842,8 +832,31 @@ class AStarPlanner(Node):
     def save_path_to_file(self, world_path):
         """将路径保存到CSV文件"""
         try:
-            # 公共工具函数统一维护路径CSV落盘逻辑，避免双版本脚本重复实现。
-            filename = save_world_path_to_csv(world_path)
+            # 获取包的路径 - ROS2使用ament_index_python
+            from ament_index_python.packages import get_package_share_directory
+            package_path = get_package_share_directory('g1_nav')
+            
+            # 创建path文件夹（如果不存在）
+            path_dir = os.path.join(package_path, 'path')
+            if not os.path.exists(path_dir):
+                os.makedirs(path_dir)
+            
+            # 使用时间戳创建唯一文件名
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = os.path.join(path_dir, f'path_{timestamp}.csv')
+            
+            # 保存到CSV文件
+            with open(filename, 'w', newline='') as csvfile:
+                # 创建CSV写入器
+                writer = csv.writer(csvfile)
+                
+                # 写入标题行
+                writer.writerow(['x', 'y'])
+                
+                # 写入所有路径点
+                for point in world_path:
+                    writer.writerow([point['x'], point['y']])
+            
             self.get_logger().info(f"路径已保存到CSV文件: {filename}")
         except Exception as e:
             self.get_logger().error(f"保存路径到文件时出错: {e}")

@@ -6,7 +6,6 @@
 #include <memory>
 
 #include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <nav_msgs/msg/odometry.hpp>
@@ -14,7 +13,6 @@
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <std_msgs/msg/float32.hpp>
-#include <std_msgs/msg/bool.hpp>
 
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/voxel_grid.h>
@@ -30,8 +28,6 @@
 #include <pcl/registration/ndt.h>
 
 #include <Eigen/Core>
-#include <deque>
-#include <mutex>
 
 #include "livox_ros_driver2/msg/custom_msg.hpp"
 #include "fast_gicp/gicp/fast_gicp.hpp" 
@@ -101,63 +97,7 @@ extern std::shared_ptr<rclcpp::Node> g_node;
 
 // 新增：配准置信度发布者和历史记录
 extern rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr confidence_pub;
-extern rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr localization_ready_pub;
 extern std::vector<RegistrationQuality> quality_history;  // 保存最近的配准质量历史
-
-// ============================================================================
-// 🧭 Deskew (Motion Compensation) configuration (ROS2 parameters)
-//
-// Why:
-// - MID360 scans are not instantaneous. During turning, points in the same scan
-//   are captured at different timestamps. If we feed such a scan directly into
-//   GICP/NDT, walls look "bent" (扇形/拉花), causing bad convergence and pose jumps.
-// - Deskew corrects each point back to a chosen reference time using IMU angular velocity.
-//
-// Scope (this implementation):
-// - Rotation-only deskew using IMU gyro (角速度). This targets the main failure mode:
-//   turning-induced distortion. Translation deskew is intentionally not included
-//   to keep implementation minimal and robust without requiring a velocity source.
-// ============================================================================
-extern bool g_enable_deskew;                 // Enable/disable deskew (rotation-only)
-extern std::string g_imu_topic;              // IMU topic name (default: /livox/imu)
-extern double g_imu_buffer_sec;              // How long IMU history to keep (seconds)
-extern int64_t g_imu_time_offset_ns;         // Optional time offset IMU->LiDAR (ns), default 0
-extern int g_deskew_reference_mode;          // 0=start, 1=mid, 2=end (reference time inside scan)
-extern int g_scan_sample_target_max;         // Max points kept after normal-space sampling per scan
-extern int g_min_scan_points_for_registration;  // Skip scan if too sparse (avoid unstable registration)
-extern int g_scan_status_log_interval_ms;    // Throttle interval for scan status logs
-
-// ============================================================================
-// ✅ Registration acceptance thresholds (ROS2 parameters)
-//
-// Why:
-// - In real robot turning, scan matching can temporarily degrade. We want to
-//   reject truly wrong matches (big jumps / low confidence) without rejecting
-//   every mildly-bad frame (which can lead to "dead-lock" and never recover).
-//
-// These values are used in locate_node_ros2.cpp.
-// ============================================================================
-extern float g_confidence_threshold;         // Minimum confidence to accept a match
-extern float g_max_position_jump_m;          // Reject if translation jump exceeds this (after warmup)
-extern float g_max_rotation_jump_rad;        // Reject if rotation jump exceeds this (after warmup)
-extern int g_reject_check_warmup_frames;     // Frames to warm up before enabling jump rejection
-
-// ============================================================================
-// 🚀 Initialization / re-localization behavior
-//
-// Goal:
-// - Default: auto-initialize from map origin (or configured pose) without
-//   requiring manual 2D Pose Estimate at startup.
-// - Still allow manual re-localization from RViz at any time.
-// ============================================================================
-extern bool g_auto_initialize_pose;          // true: auto-use configured initial pose at startup
-extern bool g_allow_runtime_relocalization;  // true: accept /initialpose even after startup
-extern double g_auto_init_x;                 // auto init x in map frame
-extern double g_auto_init_y;                 // auto init y in map frame
-extern double g_auto_init_z;                 // auto init z in map frame
-extern double g_auto_init_yaw;               // auto init yaw in map frame (rad)
-extern int g_localization_ready_streak_needed;  // consecutive high-confidence frames to mark ready
-extern bool g_localization_ready;               // runtime flag
 
 // 函数声明
 pcl::PointCloud<pcl::PointXYZ>::Ptr normalSpaceSampling(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud, int target_points);
@@ -170,7 +110,6 @@ void pointCloudProcess(pcl::PointCloud<pcl::PointXYZ>::Ptr &points_filtered);
 void livox_callback(const livox_ros_driver2::msg::CustomMsg::SharedPtr msg);
 void pcl_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
 void pointCloudPublisherThread(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub);
-void imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg);
 
 // 新增：配准质量评估函数
 RegistrationQuality evaluateRegistrationQuality(

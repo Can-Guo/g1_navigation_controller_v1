@@ -35,13 +35,13 @@ This launch file configures the complete navigation system including:
     </node>
     
     <!-- 启动A*规划器 -->
-    <node name="astar_planner" pkg="navigation_controller" type="astar_planner.py" output="screen" />
+    <node name="astar_planner" pkg="g1_nav" type="astar_planner.py" output="screen" />
     
     <!-- 启动DWA避障规划器 -->
-    <node name="dwa_planner" pkg="navigation_controller" type="dwa_planner_ros1_mid360.py" output="screen" />
+    <node name="dwa_planner" pkg="g1_nav" type="dwa_planner_ros1_mid360.py" output="screen" />
     
     <!-- 启动位置控制节点 -->
-    <node name="g1_position_control" pkg="navigation_controller" type="g1_position_control.py" output="screen">
+    <node name="g1_position_control" pkg="g1_nav" type="g1_position_control.py" output="screen">
         <param name="waypoint_distance" value="0.5"/>
         <param name="goal_tolerance" value="0.3"/>
         <!-- <param name="max_linear_speed" value="0.5"/>  -->
@@ -50,8 +50,8 @@ This launch file configures the complete navigation system including:
     </node>
          
     <!-- 启动RViz可视化 -->
-    <!-- <node pkg="rviz" type="rviz" name="fusion_rviz" args="-d $(find navigation_controller)/rviz/visualization.rviz" output="screen"> -->
-    <node pkg="rviz" type="rviz" name="fusion_rviz" args="-d /home/york/catkin_ws_nav_real/catkin_ws/src/navigation_controller/rviz/visualization.rviz" output="screen">
+    <!-- <node pkg="rviz" type="rviz" name="fusion_rviz" args="-d $(find g1_nav)/rviz/visualization.rviz" output="screen"> -->
+    <node pkg="rviz" type="rviz" name="fusion_rviz" args="-d /home/york/catkin_ws_nav_real/catkin_ws/src/g1_nav/rviz/visualization.rviz" output="screen">
     </node>
 
 

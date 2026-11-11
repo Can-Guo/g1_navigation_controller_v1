@@ -13,7 +13,7 @@ def generate_launch_description():
     # 声明启动参数
     map_file_path_arg = DeclareLaunchArgument(
         'map_file_path',
-        default_value='/home/york/ros2_ws_nav/src/navigation_controller/map/map.pcd',
+        default_value='/home/york/ros2_ws_nav/src/g1_nav/map/map.pcd',
         description='Path to the PCD map file'
     )
     

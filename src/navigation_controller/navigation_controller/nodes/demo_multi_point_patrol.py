@@ -19,7 +19,7 @@ from rclpy.action import ActionClient
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Bool
-from robot_interfaces.action import PointToPoint
+from g1_nav.action import PointToPoint
 import time
 from math import sqrt
 
@@ -163,7 +163,7 @@ class MultiPointPatrolClient(Node):
         self.get_logger().info(f'⏱️ 耗时: {elapsed:.2f} 秒')
         self.get_logger().info(f'📏 最终误差: {result.position_error:.3f} 米')
         
-        if result.result == "success":
+        if result.result ="success":
             self.get_logger().info(f'🎉 成功到达 {description}!')
             self.completed_tasks += 1
             self.total_time += elapsed
@@ -243,7 +243,7 @@ def main(args=None):
         print("\n请确保:")
         print("  1. ✅ fusion_ros2.launch.py 已启动")
         print("  2. ✅ 已在 RViz 中设置初始位姿")
-        print("  3. ✅ point_to_point_action_server.py 已运行")
+        print("  3. ✅ g1_nav_action_server.py 已运行")
         print("\n按 Enter 键开始巡航...")
         input()
         

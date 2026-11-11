@@ -13,39 +13,6 @@ int main(int argc, char **argv) {
     node->declare_parameter<float>("map_roll", 0.0f);
     node->declare_parameter<float>("map_pitch", 0.0f);
     node->declare_parameter<float>("map_yaw", 0.0f);
-
-    // =========================================================================
-    // Deskew parameters (rotation-only)
-    // =========================================================================
-    node->declare_parameter<bool>("enable_deskew", true);
-    node->declare_parameter<std::string>("imu_topic", "/livox/imu");
-    node->declare_parameter<double>("imu_buffer_sec", 5.0);
-    node->declare_parameter<int64_t>("imu_time_offset_ns", 0);
-    // 0=start, 1=mid, 2=end
-    node->declare_parameter<int>("deskew_reference_mode", 0);
-    node->declare_parameter<int>("scan_sample_target_max", 2500);
-    node->declare_parameter<int>("min_scan_points_for_registration", 800);
-    node->declare_parameter<int>("scan_status_log_interval_ms", 3000);
-
-    // =========================================================================
-    // Registration acceptance parameters
-    // =========================================================================
-    // 默认从 0.20 提升到 0.30，降低低质量配准通过率，优先保证定位稳定性。
-    node->declare_parameter<double>("confidence_threshold", 0.30);
-    node->declare_parameter<double>("max_position_jump_m", 4.0);
-    node->declare_parameter<double>("max_rotation_jump_rad", 2.0);
-    node->declare_parameter<int>("reject_check_warmup_frames", 5);
-
-    // =========================================================================
-    // Startup initialization / runtime re-localization behavior
-    // =========================================================================
-    node->declare_parameter<bool>("auto_initialize_pose", true);
-    node->declare_parameter<bool>("allow_runtime_relocalization", true);
-    node->declare_parameter<double>("auto_init_x", 0.0);
-    node->declare_parameter<double>("auto_init_y", 0.0);
-    node->declare_parameter<double>("auto_init_z", 1.30);
-    node->declare_parameter<double>("auto_init_yaw", 0.0);
-    node->declare_parameter<int>("localization_ready_streak_needed", 3);
     
     // 获取参数（使用默认值初始化，避免未初始化警告）
     std::string map_file_path = "";
@@ -61,59 +28,10 @@ int main(int argc, char **argv) {
     node->get_parameter("map_roll", map_roll);
     node->get_parameter("map_pitch", map_pitch);
     node->get_parameter("map_yaw", map_yaw);
-
-    // Read deskew params into global config (used by locate_node_ros2.cpp)
-    node->get_parameter("enable_deskew", g_enable_deskew);
-    node->get_parameter("imu_topic", g_imu_topic);
-    node->get_parameter("imu_buffer_sec", g_imu_buffer_sec);
-    node->get_parameter("imu_time_offset_ns", g_imu_time_offset_ns);
-    node->get_parameter("deskew_reference_mode", g_deskew_reference_mode);
-    node->get_parameter("scan_sample_target_max", g_scan_sample_target_max);
-    node->get_parameter("min_scan_points_for_registration", g_min_scan_points_for_registration);
-    node->get_parameter("scan_status_log_interval_ms", g_scan_status_log_interval_ms);
-
-    // Read registration thresholds into global config (used by locate_node_ros2.cpp)
-    {
-      double v = 0.0;
-      node->get_parameter("confidence_threshold", v);
-      g_confidence_threshold = static_cast<float>(v);
-      node->get_parameter("max_position_jump_m", v);
-      g_max_position_jump_m = static_cast<float>(v);
-      node->get_parameter("max_rotation_jump_rad", v);
-      g_max_rotation_jump_rad = static_cast<float>(v);
-      node->get_parameter("reject_check_warmup_frames", g_reject_check_warmup_frames);
-    }
-
-    // Read startup/relocalization behavior parameters.
-    node->get_parameter("auto_initialize_pose", g_auto_initialize_pose);
-    node->get_parameter("allow_runtime_relocalization", g_allow_runtime_relocalization);
-    node->get_parameter("auto_init_x", g_auto_init_x);
-    node->get_parameter("auto_init_y", g_auto_init_y);
-    node->get_parameter("auto_init_z", g_auto_init_z);
-    node->get_parameter("auto_init_yaw", g_auto_init_yaw);
-    node->get_parameter("localization_ready_streak_needed", g_localization_ready_streak_needed);
     
     RCLCPP_INFO(node->get_logger(), "Map file path: %s", map_file_path.c_str());
     RCLCPP_INFO(node->get_logger(), "Points type: %d (0: livox, 1: pointcloud2)", points_type);
     RCLCPP_INFO(node->get_logger(), "Topic name: %s", topic_name.c_str());
-
-    RCLCPP_INFO(node->get_logger(),
-      "Deskew: enable=%s, imu_topic=%s, imu_buffer_sec=%.1f, imu_time_offset_ns=%ld, ref_mode=%d, sample_max=%d, min_scan_pts=%d, log_interval_ms=%d",
-      g_enable_deskew ? "true" : "false", g_imu_topic.c_str(), g_imu_buffer_sec,
-      static_cast<long>(g_imu_time_offset_ns), g_deskew_reference_mode,
-      g_scan_sample_target_max, g_min_scan_points_for_registration, g_scan_status_log_interval_ms);
-
-    RCLCPP_INFO(node->get_logger(),
-      "Registration thresholds: confidence>=%.2f, pos_jump<=%.2fm, rot_jump<=%.2frad, warmup=%d frames",
-      g_confidence_threshold, g_max_position_jump_m, g_max_rotation_jump_rad, g_reject_check_warmup_frames);
-
-    RCLCPP_INFO(node->get_logger(),
-      "Initialization: auto_initialize_pose=%s, allow_runtime_relocalization=%s, "
-      "auto_init=(%.2f, %.2f, %.2f, yaw=%.2f), ready_streak=%d",
-      g_auto_initialize_pose ? "true" : "false",
-      g_allow_runtime_relocalization ? "true" : "false",
-      g_auto_init_x, g_auto_init_y, g_auto_init_z, g_auto_init_yaw,
-      g_localization_ready_streak_needed);
     
     // 配置 QoS: 使用 BEST_EFFORT 以兼容传感器数据的特性
     auto sensor_qos = rclcpp::QoS(rclcpp::KeepLast(10))
@@ -128,11 +46,6 @@ int main(int argc, char **argv) {
     auto initial_pose_sub = node->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
         "/initialpose", reliable_qos, initialPoseCallback);
     RCLCPP_INFO(node->get_logger(), "Waiting for initial pose from RViz...");
-
-    // Subscribe IMU for deskew. Use BEST_EFFORT to match typical sensor QoS.
-    // Note: Even if deskew is disabled, we still allow subscribing; it costs little.
-    auto imu_sub = node->create_subscription<sensor_msgs::msg::Imu>(
-        g_imu_topic, sensor_qos, imu_callback);
     
     // 初始化地图
     initializeMap(points_map, map_file_path, map_yaw, map_pitch, map_roll);
@@ -161,7 +74,6 @@ int main(int argc, char **argv) {
     
     // 新增：配准置信度发布者（对G1人形机器人监控定位质量很重要）
     confidence_pub = node->create_publisher<std_msgs::msg::Float32>("/localization_confidence", reliable_qos);
-    localization_ready_pub = node->create_publisher<std_msgs::msg::Bool>("/localization_ready", reliable_qos);
     RCLCPP_INFO(node->get_logger(), "配准置信度将发布到 /localization_confidence 话题");
     
     // 创建TF广播器
@@ -177,33 +89,11 @@ int main(int argc, char **argv) {
     std::thread publisher_thread(pointCloudPublisherThread, map_pub);
     publisher_thread.detach();
     
-    // 初始化策略：
-    // - auto_initialize_pose=true (默认): 启动后直接使用配置的 map 原点（或自定义初始位姿）
-    //   开始定位，不再强制等待 RViz 手动点击 initial pose。
-    // - auto_initialize_pose=false: 维持旧行为，必须等待 RViz /initialpose。
-    if (g_auto_initialize_pose) {
-        veh_pose = Eigen::Matrix4f::Identity();
-        veh_pose(0, 3) = static_cast<float>(g_auto_init_x);
-        veh_pose(1, 3) = static_cast<float>(g_auto_init_y);
-        veh_pose(2, 3) = static_cast<float>(g_auto_init_z);
-        veh_pose.topLeftCorner<3, 3>() =
-            Eigen::AngleAxisf(static_cast<float>(g_auto_init_yaw), Eigen::Vector3f::UnitZ()).toRotationMatrix();
-
-        prev_veh_pose = veh_pose;
-        received_initial_pose = true;
-        inited = false;  // force robust NDT-style re-init from configured pose
-        g_localization_ready = false;
-
-        RCLCPP_INFO(node->get_logger(),
-            "Auto-initialized pose: x=%.3f y=%.3f z=%.3f yaw=%.3f rad. "
-            "You can still manually re-localize via RViz /initialpose.",
-            g_auto_init_x, g_auto_init_y, g_auto_init_z, g_auto_init_yaw);
-    } else {
-        rclcpp::Rate wait_rate(10);
-        while (rclcpp::ok() && !received_initial_pose) {
-            rclcpp::spin_some(node);
-            wait_rate.sleep();
-        }
+    // 等待直到收到初始位姿
+    rclcpp::Rate wait_rate(10);
+    while (rclcpp::ok() && !received_initial_pose) {
+        rclcpp::spin_some(node);
+        wait_rate.sleep();
     }
     
     RCLCPP_INFO(node->get_logger(), "Initial pose received, starting localization...");
